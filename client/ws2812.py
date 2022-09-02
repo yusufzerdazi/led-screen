@@ -24,6 +24,7 @@ class Leds:
     def __init__(self, width, height):
         self.width = width
         self.height = height
+        self.brightness = 0.1
         self.strips = [
             Adafruit_NeoPixel(LED_1_COUNT, LED_1_PIN, LED_1_FREQ_HZ,
                                 LED_1_DMA, LED_1_INVERT, LED_1_BRIGHTNESS,
@@ -46,7 +47,7 @@ class Leds:
     
     def set_pixel_color(self, x, y, r, g, b):
         strip = self.get_strip(x, y)
-        strip.setPixelColor(self.get_pixel_index(x, y), Color(r, g, b))
+        strip.setPixelColor(self.get_pixel_index(x, y), Color(r * self.brightness, g * self.brightness, b * self.brightness))
     
     def blackout(self):
         for strip in self.strips:

@@ -3,6 +3,7 @@ import pyaudio
 import numpy
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+import matplotlib as mpl
 import json
 import io
 import base64
@@ -12,6 +13,8 @@ FORMAT = pyaudio.paInt16
 CHANNELS = 2
 RATE = 44100
 SAMPLE_RATE = 10
+
+mpl.rcParams['toolbar'] = 'None' 
 
 class Audio():
     def __init__(self, callback):
@@ -66,13 +69,25 @@ class Audio():
         mean = rolling_mean[:240].reshape(-1, 6).max(axis=1)
 
         plt.cla()
+        #plt.bar([i for i in range(len(p))], [j for j in p], width=1)
         plt.bar([i for i in range(len(mean))], [int(j ** 3) for j in mean])
+        #ax = plt.axes()
+        #ax.set_facecolor('black')
 
-        #self.callback(json.dumps({"frequencies": mean.tolist()}))
-        img_buf = io.BytesIO()
-        plt.savefig(img_buf, format='png')
-        self.callback(json.dumps({"type": "image", "image": base64.b64encode(img_buf.getvalue()).decode()}))
+        self.callback(json.dumps({"type": "frequency", "frequencies": mean.tolist()}))
+        #img_buf = io.BytesIO()
+        #plt.savefig(img_buf, format='png')
+        #self.callback(json.dumps({"type": "image", "image": base64.b64encode(img_buf.getvalue()).decode()}))
     
     def start_listening(self):
+        #plt.axis('off')
+        #plt.style.use('dark_background')
+        #fig = plt.gcf()
+        #fig.set_dpi(100)
+        #fig.set_size_inches(1, 1)
+        #ax = fig.add_axes([0, 0, 1, 1])
+        #ax.axis('off')
+        #ax.plot(range(10))
+
         ani = FuncAnimation(plt.gcf(), self.animate, interval=20)
         plt.show()
