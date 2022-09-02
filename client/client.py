@@ -2,6 +2,7 @@ import json
 from io import BytesIO
 import base64
 from PIL import Image
+import time
 
 import ws2812
 import mqtt
@@ -47,3 +48,6 @@ class Client:
 if __name__ == '__main__':
     client = Client()
     client.init()
+
+    while True:
+        time.sleep(20 / 1000)
