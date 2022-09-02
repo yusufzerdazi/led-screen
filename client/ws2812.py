@@ -47,7 +47,7 @@ class Leds:
     
     def set_pixel_color(self, x, y, r, g, b):
         strip = self.get_strip(x, y)
-        strip.setPixelColor(self.get_pixel_index(x, y), Color(r * self.brightness, g * self.brightness, b * self.brightness))
+        strip.setPixelColor(self.get_pixel_index(x, y), Color(int(r * self.brightness), int(g * self.brightness), int(b * self.brightness)))
     
     def blackout(self):
         for strip in self.strips:
