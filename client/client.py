@@ -20,10 +20,10 @@ class Client:
     
     def on_message(self, client, userdata, msg):
         decoded = json.loads(msg.payload.decode())
-        if msg['type'] == "frequency":
+        if decoded['type'] == "frequency":
             self.frequency_display(decoded)
-        if msg['type'] == "image":
-            self.image_display(msg)
+        if decoded['type'] == "image":
+            self.image_display(decoded)
 
     def frequency_display(self, msg):
         x = 0
