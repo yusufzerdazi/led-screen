@@ -7,6 +7,7 @@ import matplotlib as mpl
 import json
 import io
 import base64
+import asyncio
 
 CHUNK = 512
 FORMAT = pyaudio.paInt16
