@@ -4,6 +4,8 @@ import numpy
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import json
+import io
+import base64
 
 CHUNK = 512
 FORMAT = pyaudio.paInt16
@@ -66,7 +68,10 @@ class Audio():
         plt.cla()
         plt.bar([i for i in range(len(mean))], [int(j ** 3) for j in mean])
 
-        self.callback(json.dumps({"frequencies": mean.tolist()}))
+        #self.callback(json.dumps({"frequencies": mean.tolist()}))
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format='png')
+        self.callback(json.dumps({"type": "image", "image": base64.b64encode(img_buf.getvalue()).decode()}))
     
     def start_listening(self):
         ani = FuncAnimation(plt.gcf(), self.animate, interval=20)

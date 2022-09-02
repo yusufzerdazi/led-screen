@@ -20,11 +20,10 @@ LED_2_INVERT = False    # True to invert the signal (when using NPN transistor l
 LED_2_CHANNEL = 1       # 0 or 1
 LED_2_STRIP = ws.WS2812_STRIP
 
-WIDTH = 40
-HEIGHT = 30
-
 class Leds:
-    def __init__(self):
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
         self.strips = [
             Adafruit_NeoPixel(LED_1_COUNT, LED_1_PIN, LED_1_FREQ_HZ,
                                 LED_1_DMA, LED_1_INVERT, LED_1_BRIGHTNESS,
@@ -35,14 +34,14 @@ class Leds:
         ]
 
     def get_strip(self, x, y):
-        return self.strips[(x + y * WIDTH > LED_1_COUNT) * 1]
+        return self.strips[(x + y * self.width > LED_1_COUNT) * 1]
 
     def get_pixel_index(self, x, y):
         reversed = (y % 2 == 0)
         if reversed:
-            index = x + y * WIDTH
+            index = x + y * self.width
         else:
-            index = (WIDTH - x - 1) + y * WIDTH
+            index = (self.width - x - 1) + y * self.width
         return index % LED_1_COUNT
     
     def set_pixel_color(self, x, y, r, g, b):
