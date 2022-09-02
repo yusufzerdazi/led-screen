@@ -21,10 +21,10 @@ LED_2_CHANNEL = 1       # 0 or 1
 LED_2_STRIP = ws.WS2812_STRIP
 
 class Leds:
-    def __init__(self, width, height):
+    def __init__(self, width, height, brightness = 0.5):
         self.width = width
         self.height = height
-        self.brightness = 0.1
+        self.brightness = brightness
         self.strips = [
             Adafruit_NeoPixel(LED_1_COUNT, LED_1_PIN, LED_1_FREQ_HZ,
                                 LED_1_DMA, LED_1_INVERT, LED_1_BRIGHTNESS,
