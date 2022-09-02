@@ -1,6 +1,4 @@
 import json
-import paho.mqtt.client as mqttClient
-from rpi_ws281x import ws, Color, Adafruit_NeoPixel
 from io import BytesIO
 import base64
 from PIL import Image
