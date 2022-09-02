@@ -22,7 +22,3 @@ class Mqtt:
         self.client.on_connect=self.on_connect
         self.client.connect(self.broker_address, port=self.port)
         self.client.loop_start()
-    
-    def send_message(self, message):
-        if self.connected:
-            self.client.publish("mqtt/led-screen", message)
