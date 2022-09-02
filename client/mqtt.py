@@ -3,6 +3,7 @@ import paho.mqtt.client as mqttClient
 class Mqtt:
     def __init__(self, on_message):
         self.broker_address= "raspberrypi.local"
+        self.topic = "mqtt/led-screen"
         self.port = 1883
         self.connected = False
         self.on_message = on_message
