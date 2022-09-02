@@ -9,7 +9,7 @@ import ws2812
 import mqtt
 
 class Client:
-    def __init__(self, leds):
+    def __init__(self):
         self.width = 40
         self.height = 30
         self.mqtt = mqtt.Mqtt(self.on_message)
