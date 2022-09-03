@@ -21,7 +21,7 @@ LED_2_CHANNEL = 1       # 0 or 1
 LED_2_STRIP = ws.WS2812_STRIP
 
 class Leds:
-    def __init__(self, width, height, brightness = 0.5):
+    def __init__(self, width, height, brightness = 1):
         self.width = width
         self.height = height
         self.brightness = brightness
@@ -47,7 +47,7 @@ class Leds:
     
     def set_pixel_color(self, x, y, r, g, b):
         strip = self.get_strip(x, y)
-        strip.setPixelColor(self.get_pixel_index(x, y), Color(int(r * self.brightness), int(g * self.brightness), int(b * self.brightness)))
+        strip.setPixelColor(self.get_pixel_index(x, y), Color(min(int(r * self.brightness), 255), min(int(g * self.brightness), 255), min(int(b * self.brightness), 255)))
     
     def blackout(self):
         for strip in self.strips:
@@ -57,7 +57,7 @@ class Leds:
     def show(self):
         for strip in self.strips:
             strip.show()
-            time.sleep(20.0 / 1000.0)
+            time.sleep(16.0 / 1000.0)
             
     def init(self):
         for strip in self.strips:
