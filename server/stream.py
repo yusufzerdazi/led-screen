@@ -8,38 +8,36 @@ import time
 from PIL import ImageGrab
 import win32gui
 
-def get_pixel_colour(i_x, i_y):
-	import win32gui
-	i_desktop_window_id = win32gui.GetDesktopWindow()
-	i_desktop_window_dc = win32gui.GetWindowDC(i_desktop_window_id)
-	long_colour = win32gui.GetPixel(i_desktop_window_dc, i_x, i_y)
-	i_colour = int(long_colour)
-	win32gui.ReleaseDC(i_desktop_window_id,i_desktop_window_dc)
-	return (i_colour & 0xff), ((i_colour >> 8) & 0xff), ((i_colour >> 16) & 0xff)
+toplist, winlist = [], []
+def enum_cb(hwnd, results):
+    winlist.append((hwnd, win32gui.GetWindowText(hwnd)))
+win32gui.EnumWindows(enum_cb, toplist)
 
-#px = ImageGrab.grab().load()
-#bounding_box = {'top': 0, 'left': 0, 'width': 2560, 'height': 1440}
+vovoid = [(hwnd, title) for hwnd, title in winlist if 'vovoid' in title.lower()][0][0]
 
-#sct = mss()
+win32gui.SetForegroundWindow(vovoid)
+bbox = win32gui.GetWindowRect(vovoid)
+
+bounding_box = {'top': bbox[0] + 40, 'left': bbox[1], 'width': bbox[2] - 80, 'height': bbox[3] - 80}
+
+sct = mss()
 messager = mqtt.PiMessager()
 messager.connect()
 
 while True:
-    #sct_img = sct.grab(bounding_box)
-    #sct_array = np.array(sct_img)
+    sct_img = sct.grab(bounding_box)
+    sct_array = np.array(sct_img)
     #cv2.imshow('screen', sct_array)
-    #px = ImageGrab.grab().load()
     pixels = []
 
     for x in range(40):
         for y in range(30):
-            x_sample = x * 64
-            y_sample = y * 48
-            pixel = get_pixel_colour(x_sample, y_sample)
-            pixels += [[(x, 30 - y - 1), (int(pixel[0]), int(pixel[1]), int(pixel[2]))]]
+            x_sample = x * int(bounding_box['width'] / 40)
+            y_sample = y * int(bounding_box['height'] / 30)
+            pixels += [[(x, 30 - y - 1), (int(sct_array[y_sample][x_sample][2]), int(sct_array[y_sample][x_sample][1]), int(sct_array[y_sample][x_sample][0]))]]
             
     messager.send_message(json.dumps({"type": "rgb", "pixels": pixels}))
-    time.sleep(50 / 1000)
+    time.sleep(16 / 1000)
 
     #if (cv2.waitKey(1) & 0xFF) == ord('q'):
     #    cv2.destroyAllWindows()
