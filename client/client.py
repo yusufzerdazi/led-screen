@@ -2,6 +2,7 @@ import json
 from io import BytesIO
 import base64
 from PIL import Image
+import argparse
 
 import ws2812
 import mqtt
@@ -24,7 +25,7 @@ class Client:
         if decoded['type'] == "image":
             self.image_display(decoded)
         if decoded['type'] == "rgb":
-            self.image_display(decoded)
+            self.rgb_display(decoded)
 
     def frequency_display(self, msg):
         x = 0
@@ -49,6 +50,13 @@ class Client:
                 self.leds.set_pixel_color(i, j, pix[0], pix[1], pix[2])
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='LED Screen Client')
+    parser.add_argument('website', metavar='N', type=str, nargs='+',
+                        help='Website to display')
+
+    args = parser.parse_args()
+    print(args.accumulate(args.integers))
+
     client = Client()
     client.init()
 
