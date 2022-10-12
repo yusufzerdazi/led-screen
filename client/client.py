@@ -55,7 +55,7 @@ if __name__ == '__main__':
                         help='Website to display')
 
     args = parser.parse_args()
-    print(args.accumulate(args.website))
+    print(args.website)
 
     client = Client()
     client.init()
