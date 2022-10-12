@@ -23,9 +23,9 @@ class Client:
         if decoded['type'] == "frequency":
             self.frequency_display(decoded)
         if decoded['type'] == "image":
-            self.image_display(decoded)
-        if decoded['type'] == "rgb":
             self.rgb_display(decoded)
+        if decoded['type'] == "rgb":
+            self.image_display(decoded)
 
     def frequency_display(self, msg):
         x = 0
@@ -51,11 +51,11 @@ class Client:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='LED Screen Client')
-    parser.add_argument('website', metavar='N', type=str, nargs='+',
+    parser.add_argument('--website', metavar='N', type=str, nargs='+',
                         help='Website to display')
 
     args = parser.parse_args()
-    print(args.accumulate(args.integers))
+    print(args.accumulate(args.website))
 
     client = Client()
     client.init()
