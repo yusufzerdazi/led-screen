@@ -22,7 +22,7 @@ class Client:
         self.leds.init()
     
     async def load_website(self, url):
-        self.browser = await launch()
+        self.browser = await launch(headless=True, executablePath='/usr/bin/chromium')
         self.page = await self.browser.newPage()
         await self.page.goto(url)
     
