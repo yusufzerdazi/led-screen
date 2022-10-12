@@ -16,7 +16,6 @@ class Client:
         self.height = 30
         self.mqtt = mqtt.Mqtt(self.on_message)
         self.leds = ws2812.Leds(40, 30)
-        asyncio.get_event_loop().run_until_complete(self.load_website())
 
     def init(self):
         self.mqtt.connect()
