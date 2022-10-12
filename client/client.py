@@ -1,8 +1,11 @@
+from ast import arg
 import json
 from io import BytesIO
 import base64
 from PIL import Image
 import argparse
+import asyncio
+from pyppeteer import launch
 
 import ws2812
 import mqtt
@@ -13,10 +16,16 @@ class Client:
         self.height = 30
         self.mqtt = mqtt.Mqtt(self.on_message)
         self.leds = ws2812.Leds(40, 30)
+        asyncio.get_event_loop().run_until_complete(self.load_website())
 
     def init(self):
         self.mqtt.connect()
         self.leds.init()
+    
+    async def load_website(self, url):
+        self.browser = await launch()
+        self.page = await self.browser.newPage()
+        await self.page.goto(url)
     
     def on_message(self, client, userdata, msg):
         decoded = json.loads(msg.payload.decode())
@@ -43,11 +52,18 @@ class Client:
 
     def rgb_display(self, msg):
         im = Image.open(BytesIO(base64.b64decode(msg['image'])))
+        self.pil_display(im)
+
+    def pil_display(self, pil):
         im = im.resize((self.width, self.height), Image.ANTIALIAS)
         for i in range(self.width):
             for j in range(self.height):
                 pix = im.getpixel((i, self.height - j - 1))
                 self.leds.set_pixel_color(i, j, pix[0], pix[1], pix[2])
+
+    async def website_display(self):
+        await self.page.screenshot({'path': 'web.png'})
+        self.pil_display(Image.open("web.png"))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='LED Screen Client')
@@ -60,5 +76,10 @@ if __name__ == '__main__':
     client = Client()
     client.init()
 
+    if(args.website):
+        asyncio.get_event_loop().run_until_complete(client.load_website(args.website[0]))
+
     while True:
         client.leds.show()
+        if(args.website):
+            asyncio.get_event_loop().run_until_complete(client.website_display)

@@ -1,3 +1,5 @@
 rpi_ws281x
 PIL
 paho-mqtt
+pyppeteer
+asyncio
