@@ -31,7 +31,7 @@ top_buffer = 31
 
 class BackgroundTasks(threading.Thread):
     def run(self,*args,**kwargs):
-        subprocess.call([visualisers[0]['path']])
+        subprocess.call([visualisers[1]['path']])
 
 t = BackgroundTasks()
 t.start()
@@ -43,7 +43,7 @@ def enum_cb(hwnd, results):
     winlist.append((hwnd, win32gui.GetWindowText(hwnd)))
 win32gui.EnumWindows(enum_cb, toplist)
 
-visualiser_window = [(hwnd, title) for hwnd, title in winlist if visualisers[0]['name'] in title.lower()][0][0]
+visualiser_window = [(hwnd, title) for hwnd, title in winlist if visualisers[1]['name'] in title.lower()][0][0]
 win32gui.SetWindowPos(visualiser_window, win32con.HWND_TOPMOST, 0, 0, window_width + 2 * width_buffer, window_height + width_buffer + top_buffer, 0) 
 time.sleep(2)
 bbox = win32gui.GetWindowRect(visualiser_window)

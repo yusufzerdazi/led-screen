@@ -35,7 +35,7 @@ class Leds:
         ]
 
     def get_strip(self, x, y):
-        return self.strips[(x + y * self.width > LED_1_COUNT) * 1]
+        return self.strips[(x + y * self.width >= LED_1_COUNT) * 1]
 
     def get_pixel_index(self, x, y):
         reversed = (y % 2 == 0)
