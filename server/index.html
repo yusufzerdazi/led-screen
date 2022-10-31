@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<body style="background-color:black; color: white;">
+
+<p>Temperature: <span id="temperature"></span>°C</p>
+<p>Blinds: <span id="blinds"></span></p>
+<script>
+    setInterval((() => {
+        fetch("http://192.168.0.46/api/45F3isezBAfXK82b401E9MfiyFgAMCIs7nIGtoUV/sensors/12")
+            .then(r => r.json())
+            .then(r => {
+                document.getElementById("temperature").innerHTML = r.state.temperature / 100;
+            });
+        fetch("/blinds/status")
+            .then(r => r.text())
+            .then(t => {
+                document.getElementById("temperature").innerHTML = t.split("stepperlastpreset: ")[1].split("\"")[0];
+            })
+    })(), 100000);
+</script>
+</body>
+</html>
