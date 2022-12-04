@@ -2,9 +2,10 @@ from ast import arg
 import json
 from io import BytesIO
 import base64
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import argparse
 import asyncio
+import requests
 from pyppeteer import launch
 from picamera2 import Picamera2
 import numpy as np
@@ -76,6 +77,18 @@ class Client:
         image = self.camera.capture_file("cam.png")
         self.pil_display(Image.open("cam.png"))
         #self.image_display({"pixels": [((x, y), (image[x][y][0], image[x][y][1], image[x][y][2])) for x in range(len(image)) for y in range(len(image[0]))]})
+
+    def dashboard_display(self):
+        sensor_response = requests.get("http://192.168.0.46/api/45F3isezBAfXK82b401E9MfiyFgAMCIs7nIGtoUV/sensors/12").json()
+
+        im = Image.new("RGB", (60,40))
+        draw = ImageDraw.Draw(im)
+        fn = ImageFont.truetype('')
+        draw.text((0,0), "Hello", font=fn)
+        del draw
+
+        self.pil_display(im)
+
       
     async def website_display(self):
         await self.page.screenshot({'path': 'web.png'})
@@ -94,19 +107,22 @@ if __name__ == '__main__':
         client = Client()
         client.init()
         
-        if(args.mode == "website"):
+        if("website" in args.mode):
             if(args.website):
                 asyncio.get_event_loop().run_until_complete(asyncio.gather(client.load_website(args.website[0])))
-        if(args.mode == "camera"):
+        elif("camera" in args.mode):
             client.load_camera()
             client.camera.start()
+
             
         while True:
             client.leds.show()
-            if(args.mode == "website"):
-                asyncio.get_event_loop().run_until_complete(asyncio.gather(client.website_display()))
-            if(args.mode == "camera"):
+            if("camera" in args.mode):
                 client.camera_display()
+            elif("website" in args.mode):
+                asyncio.get_event_loop().run_until_complete(asyncio.gather(client.website_display()))
+            elif("dashboard" in args.mode):
+                client.dashboard_display()
     except KeyboardInterrupt:
         print("Exiting LED client")
         if(args.mode == "camera"):
