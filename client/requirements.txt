@@ -1,5 +1,7 @@
-rpi_ws281x
+pi5neo
 pillow
 paho-mqtt
 pyppeteer
 asyncio
+requests
+numpy

@@ -2,7 +2,7 @@ import paho.mqtt.client as mqttClient
 
 class Mqtt:
     def __init__(self, on_message):
-        self.broker_address= "raspberrypi.local"
+        self.broker_address= "raspberrypi2.local"
         self.topic = "mqtt/led-screen"
         self.port = 1883
         self.connected = False
@@ -18,7 +18,7 @@ class Mqtt:
             print("Connection failed")
 
     def connect(self):
-        self.client = mqttClient.Client("client")
+        self.client = mqttClient.Client(mqttClient.CallbackAPIVersion.VERSION1, "client")
         self.client.on_connect=self.on_connect
         self.client.connect(self.broker_address, port=self.port)
         self.client.loop_start()
