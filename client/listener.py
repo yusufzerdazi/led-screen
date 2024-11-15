@@ -41,7 +41,6 @@ class SpeechRecognizer:
     def recognize_audio(self, audio: sr.AudioData) -> str:
         print("Understanding")
         try:
-            #speech = self.rec.recognize_whisper_api(audio, model='whisper-1', api_key=API_KEY)
             with open("microphone-results.wav", "wb") as f:
                 f.write(audio.get_wav_data())
 
@@ -93,7 +92,25 @@ class SpeechRecognizer:
                 }
             )
 
-            messager.send_message(json.dumps({"type": "hydra", "content": completion.choices[0].message.content}))
+            # Parse and unescape the response content
+            response_content = completion.choices[0].message.content
+            try:
+                # If the content is a string representation of JSON, parse it
+                if isinstance(response_content, str):
+                    response_content = json.loads(response_content)
+                
+                # Unescape any escaped characters in the code field
+                if 'code' in response_content:
+                    response_content['code'] = json.loads(f'"{response_content["code"]}"')
+                
+                # Convert back to JSON string for sending
+                response_content = json.dumps(response_content)
+            except json.JSONDecodeError:
+                print("Warning: Could not parse response as JSON")
+            except Exception as e:
+                print(f"Warning: Error processing response: {e}")
+
+            messager.send_message(json.dumps({"type": "hydra", "content": response_content}))
 
         except sr.UnknownValueError:
             speech = "# Failed to recognize speech"

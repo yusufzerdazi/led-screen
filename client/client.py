@@ -155,7 +155,7 @@ class Client:
         if decoded['type'] == "hydra":
             print(decoded)
             content = json.loads(decoded['content'])
-            if content['display']:
+            if 'display' in content and content['display']:
                 # Check cooldown before showing new visualization
                 if not self.can_show_visualization():
                     print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
