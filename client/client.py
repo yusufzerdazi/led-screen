@@ -23,6 +23,8 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
+from text_scroller import TextScroller
+
 # Configure ChromeOptions
 chrome_options = Options()
 chrome_options.add_argument("--headless")  # Run in headless mode
@@ -59,6 +61,9 @@ class Client:
         self.server = server
         self.mqtt = mqtt.Mqtt(self.on_message)
         self.leds = leds
+        self.text_scroller = TextScroller(self.width, self.height)
+        self.display_mode = None
+        self.queued_url = None
 
     def init(self):
         self.mqtt.connect()
@@ -133,6 +138,7 @@ class Client:
     def on_message(self, client, userdata, msg):
         decoded = json.loads(msg.payload.decode())
         if decoded['type'] == "frequency":
+            self.display_mode = 'frequency'
             self.frequency_display(decoded)
         if decoded['type'] == "image":
             self.rgb_display(decoded)
@@ -144,11 +150,38 @@ class Client:
             print(decoded)
             content = json.loads(decoded['content'])
             if content['display']:
+                # Show quip first
+                if 'quip' in content:
+                    self.text_scroller.start_scroll(content['quip'])
+                    self.display_mode = 'scroll'
+                
+                # Queue the URL for after scrolling
                 new_code = base64.b64encode(content['code'].encode('utf-8'))
-                self.url = "https://hydra.ojack.xyz?code=" + new_code.decode('utf-8')
-                print(self.url)
+                self.queued_url = "https://hydra.ojack.xyz?code=" + new_code.decode('utf-8')
+                print(self.queued_url)
                 self.load_website()
 
+    def update_display(self):
+        """Main display update method"""
+        if self.display_mode == 'scroll' and self.text_scroller.is_scrolling:
+            frame = self.text_scroller.get_frame()
+            if frame:
+                self.pil_display(frame)
+            else:
+                # Scrolling finished, switch to queued URL if exists
+                if self.queued_url:
+                    self.load_website(self.queued_url)
+                    self.queued_url = None
+                    self.display_mode = 'website'
+        elif self.display_mode == 'website':
+            self.website_display()
+        elif self.display_mode == 'camera':
+            self.camera_display()
+        elif self.display_mode == 'dashboard':
+            self.dashboard_display()
+        elif self.display_mode == 'frequency':
+            # Frequency display is handled by mqtt messages
+            pass
 
     def frequency_display(self, msg):
         x = 0
@@ -206,20 +239,10 @@ class Client:
         #     self.pil_display(Image.open("web.png"))
 
 def start(args, client):
-    i = 0
     while True:
+        client.update_display()
         client.leds.show()
-        if(args.mode and "camera" in args.mode):
-            client.camera_display()
-        elif(args.mode and "website" in args.mode):
-            client.website_display()
-        elif(args.mode and "dashboard" in args.mode):
-            client.dashboard_display()
-        i += 1
-
-        # if i % 50 == 0:
-        #     client.load_website()
-
+        time.sleep(0.05)  # Small delay to control refresh rate
 
 if __name__ == '__main__':
     try:
@@ -243,10 +266,13 @@ if __name__ == '__main__':
         if(args.mode and "camera" in args.mode):
             client.load_camera()
             client.camera.start()
-        if(args.mode and "website" in args.mode):
+            client.display_mode = 'camera'
+        elif(args.mode and "website" in args.mode):
             if(args.website):
                 client.load_website(args.website[0])
-
+                client.display_mode = 'website'
+        elif(args.mode and "dashboard" in args.mode):
+            client.display_mode = 'dashboard'
 
         client.init()
         #client.leds.start()
