@@ -22,6 +22,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 
 from text_scroller import TextScroller
 
@@ -120,26 +121,27 @@ class Client:
             # Hide UI elements
             self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
-        else:
-            # For subsequent code updates, update the editor and run
-            if self.queued_url:
-                # Extract code from URL
-                code = base64.b64decode(self.queued_url.split('code=')[1]).decode('utf-8')
-                
-                # Update editor content and run
-                self.driver.execute_script("""
-                    // Click editor to focus
-                    document.querySelector('#editor-container').click();
-                    
-                    // Select all existing code
-                    document.execCommand('selectAll', false, null);
-                    
-                    // Replace with new code
-                    document.execCommand('insertText', false, arguments[0]);
-                    
-                    // Click run button
-                    document.querySelector('#run-icon').click();
-                """, code)
+
+    def update_hydra_code(self, code):
+        """Update the Hydra editor with new code without page reload"""
+        try:
+            # Find and click the editor container
+            editor = self.driver.find_element(By.ID, "editor-container")
+            editor.click()
+            
+            # Send keyboard shortcuts for select all (Ctrl+A) and delete
+            editor.send_keys(Keys.CONTROL + 'a')
+            editor.send_keys(Keys.DELETE)
+            
+            # Type the new code
+            editor.send_keys(code)
+            
+            # Find and click the run button
+            run_button = self.driver.find_element(By.ID, "run-icon")
+            run_button.click()
+            
+        except Exception as e:
+            print(f"Error updating code: {e}")
 
     def on_message(self, client, userdata, msg):
         decoded = json.loads(msg.payload.decode())
@@ -154,28 +156,27 @@ class Client:
             self.leds.blackout()
         if decoded['type'] == "hydra":
             print(decoded)
-            content = json.loads(decoded['content'])
-            if 'display' in content and content['display']:
-                # Check cooldown before showing new visualization
-                if not self.can_show_visualization():
-                    print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
-                    return
-                
-                # Show quip first
-                if 'quip' in content:
-                    self.text_scroller.start_scroll(content['quip'])
-                    self.display_mode = 'scroll'
-                
-                # Queue the code
-                new_code = base64.b64encode(content['code'].encode('utf-8'))
-                self.queued_url = "http://localhost:5173?code=" + new_code.decode('utf-8')
-                print(self.queued_url)
-                
-                # Update code without reloading page
-                self.load_website()
-                
-                # Update last visualization time
-                self.last_visualization_time = time.time()
+            try:
+                content = json.loads(decoded['content'])
+                if 'display' in content and content['display']:
+                    # Check cooldown before showing new visualization
+                    if not self.can_show_visualization():
+                        print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
+                        return
+                    
+                    # Show quip first
+                    if 'quip' in content:
+                        self.text_scroller.start_scroll(content['quip'])
+                        self.display_mode = 'scroll'
+                    
+                    # Update the Hydra code directly
+                    if 'code' in content:
+                        self.update_hydra_code(content['code'])
+                    
+                    # Update last visualization time
+                    self.last_visualization_time = time.time()
+            except Exception as e:
+                print(f"Error processing hydra message: {e}")
 
     def update_display(self):
         """Main display update method"""

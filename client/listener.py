@@ -92,25 +92,7 @@ class SpeechRecognizer:
                 }
             )
 
-            # Parse and unescape the response content
-            response_content = completion.choices[0].message.content
-            try:
-                # If the content is a string representation of JSON, parse it
-                if isinstance(response_content, str):
-                    response_content = json.loads(response_content)
-                
-                # Unescape any escaped characters in the code field
-                if 'code' in response_content:
-                    response_content['code'] = json.loads(f'"{response_content["code"]}"')
-                
-                # Convert back to JSON string for sending
-                response_content = json.dumps(response_content)
-            except json.JSONDecodeError:
-                print("Warning: Could not parse response as JSON")
-            except Exception as e:
-                print(f"Warning: Error processing response: {e}")
-
-            messager.send_message(json.dumps({"type": "hydra", "content": response_content}))
+            messager.send_message(json.dumps({"type": "hydra", "content": completion.choices[0].message.content}))
 
         except sr.UnknownValueError:
             speech = "# Failed to recognize speech"
