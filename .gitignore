@@ -1,2 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+
+# Environment variables
+.env
+client/.env
+
+# Media files
+*.wav
+*.png
+out/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+*~
+
 *.pyc
 .venv

@@ -4,11 +4,15 @@ from concurrent import futures
 import sounddevice
 import json
 from messager import PiMessager
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 messager = PiMessager()
 messager.connect()
 
-API_KEY = ''
+API_KEY = os.getenv('OPENAI_API_KEY')
 
 from openai import OpenAI
 client = OpenAI(api_key=API_KEY)

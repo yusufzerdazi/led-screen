@@ -5,3 +5,8 @@ pyppeteer
 asyncio
 requests
 numpy
+selenium
+sounddevice
+SpeechRecognition
+openai
+python-dotenv
