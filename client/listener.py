@@ -66,28 +66,27 @@ class SpeechRecognizer:
                     "type": "json_schema",
                     "json_schema": {
                         "name": "code_schema",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "code": {
-                                    "description": "The actual code content",
-                                    "type": "string"
-                                },
-                                "description": {
-                                    "description": "A description of what it displays",
-                                    "type": "string"
-                                },
-                                "quip": {
-                                    "description": "A max 5 word robotic quip for Easel-E to display prior to the visulizer. The target audience is attendees of Burning Man. The quip should be directed at the audience and be a bit cheeky",
-                                    "type": "string"
-                                },
-                                "display": {
-                                    "description": "Whether the prompt would make a cool visual or not. If a random word was picked up it should not display on screen.",
-                                    "type": "boolean"
-                                },
-                                "additionalProperties": False
+                        "type": "object",
+                        "required": ["code", "description", "quip", "display"],
+                        "properties": {
+                            "code": {
+                                "description": "The actual code content",
+                                "type": "string"
+                            },
+                            "description": {
+                                "description": "A description of what it displays",
+                                "type": "string"
+                            },
+                            "quip": {
+                                "description": "A max 5 word robotic quip for Easel-E to display prior to the visulizer. The target audience is attendees of Burning Man. The quip should be directed at the audience and be a bit cheeky",
+                                "type": "string"
+                            },
+                            "display": {
+                                "description": "Whether the prompt would make a cool visual or not. If a random word was picked up it should not display on screen.",
+                                "type": "boolean"
                             }
-                        }
+                        },
+                        "additionalProperties": False
                     }
                 }
             )
