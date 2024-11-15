@@ -66,10 +66,9 @@ class SpeechRecognizer:
                     "type": "json_schema",
                     "json_schema": {
                         "name": "code_schema",
-                        "type": "object",
                         "schema": {
                             "type": "object",
-                        "required": ["code", "description", "quip", "display"],
+                            "required": ["code", "description", "quip", "display"],
                             "properties": {
                                 "code": {
                                     "description": "The actual code content",
