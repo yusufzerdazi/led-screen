@@ -85,11 +85,10 @@ class SpeechRecognizer:
                                 "display": {
                                     "description": "Whether the prompt would make a cool visual or not. If a random word was picked up it should not display on screen.",
                                     "type": "boolean"
-                                },
-                                "additionalProperties": False
-                            }
-                        },
-                        "additionalProperties": False
+                                }
+                            },
+                            "additionalProperties": False
+                        }
                     }
                 }
             )
