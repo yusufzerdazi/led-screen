@@ -64,7 +64,17 @@ class Client:
         self.text_scroller = TextScroller(self.width, self.height)
         self.display_mode = None
         self.queued_url = None
-
+        
+        # Add cooldown tracking
+        self.last_visualization_time = 0
+        self.cooldown_period = 120  # 2 minutes in seconds
+    
+    def can_show_visualization(self):
+        """Check if enough time has passed since last visualization"""
+        current_time = time.time()
+        time_since_last = current_time - self.last_visualization_time
+        return time_since_last >= self.cooldown_period
+    
     def init(self):
         self.mqtt.connect()
         self.leds.init()
@@ -150,6 +160,11 @@ class Client:
             print(decoded)
             content = json.loads(decoded['content'])
             if content['display']:
+                # Check cooldown before showing new visualization
+                if not self.can_show_visualization():
+                    print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
+                    return
+                
                 # Show quip first
                 if 'quip' in content:
                     self.text_scroller.start_scroll(content['quip'])
@@ -157,9 +172,12 @@ class Client:
                 
                 # Queue the URL for after scrolling
                 new_code = base64.b64encode(content['code'].encode('utf-8'))
-                self.queued_url = "https://hydra.ojack.xyz?code=" + new_code.decode('utf-8')
+                self.queued_url = "http://localhost:8000?code=" + new_code.decode('utf-8')
                 print(self.queued_url)
                 self.load_website()
+                
+                # Update last visualization time
+                self.last_visualization_time = time.time()
 
     def update_display(self):
         """Main display update method"""

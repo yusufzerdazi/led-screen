@@ -6,6 +6,7 @@ cleanup() {
     # Kill all background processes in the current process group
     kill $(jobs -p) 2>/dev/null
     pkill -f rpicam-vid
+    pkill -f "npm run dev"
     exit 0
 }
 
@@ -24,13 +25,20 @@ fi
 
 sudo apt install python3-pyaudio
 
+# Start local Hydra instance
+echo "Starting local Hydra instance..."
+cd /home/yusuf/Code/hydra && npm run dev &
+
+# Wait for Hydra to start up
+sleep 5
+
 # Start the camera stream using rpicam-vid
 echo "Starting camera stream..."
 rpicam-vid -t 0 --width 120 --height 80 --codec h264 --listen -o tcp://0.0.0.0:10001 -n &
 
-# Start the LED client
+# Start the LED client with local Hydra URL
 echo "Starting LED client..."
-python3 client.py --mode website --website https://hydra.ojack.xyz &
+python3 client.py --mode website --website http://localhost:8000 &
 
 # Start the speech recognition listener
 echo "Starting speech listener..."
