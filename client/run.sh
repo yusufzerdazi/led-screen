@@ -26,7 +26,7 @@ sudo apt install python3-pyaudio
 
 # Start the camera stream using rpicam-vid
 echo "Starting camera stream..."
-rpicam-vid -t 0 --width 120 --height 80 --codec h264 --listen -o tcp://0.0.0.0:10001 &
+rpicam-vid -t 0 --width 120 --height 80 --codec h264 --listen -o tcp://0.0.0.0:10001 -n &
 
 # Start the LED client
 echo "Starting LED client..."
