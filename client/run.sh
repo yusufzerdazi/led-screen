@@ -15,7 +15,7 @@ trap cleanup SIGINT SIGTERM
 # Create and activate virtual environment if it doesn't exist
 if [ ! -d ".venv" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv .venv
+    python3 -m venv .venv --system-site-packages
     source .venv/bin/activate
     pip install -r requirements.txt
 else
