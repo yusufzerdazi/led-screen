@@ -38,7 +38,7 @@ rpicam-vid -t 0 --width 120 --height 80 --codec h264 --listen -o tcp://0.0.0.0:1
 
 # Start the LED client with local Hydra URL
 echo "Starting LED client..."
-python3 client.py --mode website --website http://localhost:8000 &
+python3 client.py --mode website --website http://localhost:5173 &
 
 # Start the speech recognition listener
 echo "Starting speech listener..."

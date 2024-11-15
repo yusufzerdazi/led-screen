@@ -110,41 +110,37 @@ class Client:
             print("streaming")
     
     def load_website(self, url = None):
-        #threading.Thread(target=self.start_camera_stream).start()
-
-        
-        #data = io.BytesIO()
-        #self.camera.capture_file(data, format='png')
-        #image = base64.b64encode(data.getvalue()).decode()
-        
-        #print(image)
-        
-        #url_parts = url.split("=")
-        #code = url_parts[1] + '=='
-        #print(code)
-        #code_decoded = base64.b64decode(code)
-        #code.replace("{{image}}", "data:image/png;base64," + image)
-        #new_code = base64.b64encode(code.encode('utf-8'))
-        #url = url_parts[0] + "=" + str(new_code)
-    
         if url != None:
             self.url = url
+            # Only create new browser instance for initial load
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            self.driver.set_window_size(240, 160)
+            self.driver.get(self.url)
+            
+            # Hide UI elements
+            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
+            self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+        else:
+            # For subsequent code updates, update the editor and run
+            if self.queued_url:
+                # Extract code from URL
+                code = base64.b64decode(self.queued_url.split('code=')[1]).decode('utf-8')
+                
+                # Update editor content and run
+                self.driver.execute_script("""
+                    // Click editor to focus
+                    document.querySelector('#editor-container').click();
+                    
+                    // Select all existing code
+                    document.execCommand('selectAll', false, null);
+                    
+                    // Replace with new code
+                    document.execCommand('insertText', false, arguments[0]);
+                    
+                    // Click run button
+                    document.querySelector('#run-icon').click();
+                """, code)
 
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.driver.set_window_size(240, 160)
-        self.driver.get(self.url)
-
-        self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
-        self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
-        
-        # self.browser = await launch(headless=True, executablePath='/usr/bin/chromium', options={'args': ['--no-sandbox','--use-fake-ui-for-media-stream', '--allow-file-access-from-files']})
-        # self.page = await self.browser.newPage()
-        
-        # await self.page.setViewport({"width":1200, "height":800})
-        # await self.page.goto(url)
-
-        # await self.page.addStyleTag({'content': '#modal{opacity: 0} #editor-container{opacity: 0}'})
-    
     def on_message(self, client, userdata, msg):
         decoded = json.loads(msg.payload.decode())
         if decoded['type'] == "frequency":
@@ -170,10 +166,12 @@ class Client:
                     self.text_scroller.start_scroll(content['quip'])
                     self.display_mode = 'scroll'
                 
-                # Queue the URL for after scrolling
+                # Queue the code
                 new_code = base64.b64encode(content['code'].encode('utf-8'))
-                self.queued_url = "http://localhost:8000?code=" + new_code.decode('utf-8')
+                self.queued_url = "http://localhost:5173?code=" + new_code.decode('utf-8')
                 print(self.queued_url)
+                
+                # Update code without reloading page
                 self.load_website()
                 
                 # Update last visualization time
