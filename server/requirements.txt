@@ -1,2 +1,6 @@
-PIL
+pillow
 paho-mqtt
+numpy
+opencv-python
+mss
+pywin32

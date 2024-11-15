@@ -29,7 +29,7 @@ window_height = 120
 width_buffer = 8
 top_buffer = 31
 border_buffer = 4
-
+print("tetsts")
 class BackgroundTasks(threading.Thread):
     def run(self,*args,**kwargs):
         subprocess.call([visualisers[0]['path']])
@@ -76,6 +76,7 @@ try:
                 #pixels += [[(x, 30 - y - 1), (int(px.getpixel((x, y))[0]), int(px.getpixel((x, y))[1]), int(px.getpixel((x, y))[2]))]]
         
         messager.send_message(json.dumps({"type": "rgb", "pixels": pixels}))
+        
         win32gui.SetWindowPos(visualiser_window, win32con.HWND_TOPMOST, 0, 0, window_width + 2 * width_buffer, window_height + width_buffer + top_buffer, 0) 
         time.sleep(40 / 1000)
 

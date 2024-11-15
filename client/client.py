@@ -2,11 +2,17 @@ from ast import arg
 import json
 from io import BytesIO
 import base64
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 import argparse
 import requests
-# from pyppeteer import launch
+import socket
+import io
+# from pyppeteer import launchimport socket
+
 from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import FileOutput
+
 import numpy as np
 from threading import Thread
 import threading
@@ -21,7 +27,15 @@ from selenium.webdriver.common.by import By
 chrome_options = Options()
 chrome_options.add_argument("--headless")  # Run in headless mode
 chrome_options.add_argument("--no-sandbox")  # No sandbox for Pi
-chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+#chrome_options.add_argument("--ignore-gpu-blacklist")
+#chrome_options.add_argument("--enable-webgl")
+#chrome_options.add_argument("--use-fake-device-for-media-stream");
+#chrome_options.add_argument("--use-fake-ui-for-media-stream")
+
+chrome_options.add_experimental_option("prefs", { \
+    "profile.default_content_setting_values.media_stream_mic": 1, 
+    "profile.default_content_setting_values.media_stream_camera": 1
+})
 
 # Initialize the WebDriver instance
 service = Service('/usr/bin/chromedriver')  # Path to Chromium's driver
@@ -32,33 +46,82 @@ import mqtt
 
 lock = threading.RLock()
 
+def change_contrast(img, level):
+    factor = (259 * (level + 255)) / (255 * (259 - level))
+    def contrast(c):
+        return 128 + factor * (c - 128)
+    return img.point(contrast)
+
 class Client:
     def __init__(self, leds, server=False):
         self.width = 40
         self.height = 30
         self.server = server
-        if self.server:
-            self.mqtt = mqtt.Mqtt(self.on_message)
+        self.mqtt = mqtt.Mqtt(self.on_message)
         self.leds = leds
 
     def init(self):
-        if self.server:
-            self.mqtt.connect()
+        self.mqtt.connect()
         self.leds.init()
 
     def load_camera(self):
-       self.camera = Picamera2()
-       preview_config = self.camera.create_preview_configuration(main={"size": (120, 80)}, lores={"size": (120, 80)}, display="lores")
-       self.camera.configure(preview_config)
+        self.camera = Picamera2()
+        preview_config = self.camera.create_preview_configuration(main={"size": (120, 80)}, lores={"size": (120, 80)}, display="lores")
+        self.camera.configure(preview_config)
+
+    def start_camera_stream(self):
+        self.camera = Picamera2()
+        video_config = self.camera.create_preview_configuration(main={"size": (120, 80)}, lores={"size": (120, 80)}, display="lores")
+        self.camera.configure(video_config)
+        encoder = H264Encoder(1000000)
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("0.0.0.0", 10001))
+            sock.listen()
+
+            self.camera.encoders = encoder
+
+            print("1")
+            conn, addr = sock.accept()
+            print("2")
+            stream = conn.makefile("wb")
+            print("3")
+            encoder.output = FileOutput(stream)
+            print("4")
+            self.camera.start_encoder(encoder)
+            print("starting stream")
+            self.camera.start()
+            print("streaming")
     
-    def load_website(self, url):
+    def load_website(self, url = None):
+        #threading.Thread(target=self.start_camera_stream).start()
+
         
+        #data = io.BytesIO()
+        #self.camera.capture_file(data, format='png')
+        #image = base64.b64encode(data.getvalue()).decode()
+        
+        #print(image)
+        
+        #url_parts = url.split("=")
+        #code = url_parts[1] + '=='
+        #print(code)
+        #code_decoded = base64.b64decode(code)
+        #code.replace("{{image}}", "data:image/png;base64," + image)
+        #new_code = base64.b64encode(code.encode('utf-8'))
+        #url = url_parts[0] + "=" + str(new_code)
+    
+        if url != None:
+            self.url = url
+
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
         self.driver.set_window_size(240, 160)
-        self.driver.get(url)
+        self.driver.get(self.url)
 
         self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
         self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+        
         # self.browser = await launch(headless=True, executablePath='/usr/bin/chromium', options={'args': ['--no-sandbox','--use-fake-ui-for-media-stream', '--allow-file-access-from-files']})
         # self.page = await self.browser.newPage()
         
@@ -77,6 +140,15 @@ class Client:
             self.image_display(decoded)
         if decoded['type'] == "blackout":
             self.leds.blackout()
+        if decoded['type'] == "hydra":
+            print(decoded)
+            content = json.loads(decoded['content'])
+            if content['display']:
+                new_code = base64.b64encode(content['code'].encode('utf-8'))
+                self.url = "https://hydra.ojack.xyz?code=" + new_code.decode('utf-8')
+                print(self.url)
+                self.load_website()
+
 
     def frequency_display(self, msg):
         x = 0
@@ -97,11 +169,11 @@ class Client:
         self.pil_display(im)
 
     def bytes_display(self, img):
-        im = Image.open(BytesIO(base64.b64decode(img)))
+        im = ImageEnhance.Contrast(Image.open(BytesIO(base64.b64decode(img)))).enhance(150)
         self.pil_display(im)
 
     def pil_display(self, pil):
-        im = pil.resize((self.width, self.height), Image.NEAREST)
+        im = pil.resize((self.width, self.height), Image.LANCZOS)
         for i in range(self.width):
             for j in range(self.height):
                 pix = im.getpixel((i, self.height - j - 1))
@@ -127,21 +199,26 @@ class Client:
     def website_display(self):
         image = self.driver.get_screenshot_as_base64()
         self.bytes_display(image)
-
+        #pass
         # with lock:
         #     await self.page.screenshot(path='web.png')
         #     time.sleep(1)
         #     self.pil_display(Image.open("web.png"))
 
 def start(args, client):
+    i = 0
     while True:
-        
+        client.leds.show()
         if(args.mode and "camera" in args.mode):
             client.camera_display()
         elif(args.mode and "website" in args.mode):
             client.website_display()
         elif(args.mode and "dashboard" in args.mode):
             client.dashboard_display()
+        i += 1
+
+        # if i % 50 == 0:
+        #     client.load_website()
 
 
 if __name__ == '__main__':
@@ -163,20 +240,19 @@ if __name__ == '__main__':
 
         client = Client(leds, server)
 
+        if(args.mode and "camera" in args.mode):
+            client.load_camera()
+            client.camera.start()
         if(args.mode and "website" in args.mode):
             if(args.website):
                 client.load_website(args.website[0])
-        elif(args.mode and "camera" in args.mode):
-            client.load_camera()
-            client.camera.start()
 
-
-        client.leds.start()
-        
-        thread = Thread(target=start, args=(args, client))
-        thread.start()
 
         client.init()
+        #client.leds.start()
+
+        thread = Thread(target=start, args=(args, client))
+        thread.start()
         
 
     except KeyboardInterrupt:
