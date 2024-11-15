@@ -1,19 +1,10 @@
 import time
-import board
-import busio
-import neopixel
 import threading
 import concurrent.futures
 from pi5neo import Pi5Neo
-#from adafruit_bus_device.spi_device import SPIDevice
-
-# LED strip configuration:
-LED_1_COUNT = 600        # Number of LED pixels.
-
-LED_2_COUNT = 600       # Number of LED pixels.
 
 lock = threading.RLock()
-print(dir(neopixel))
+
 class Leds:
     def __init__(self, width, height, brightness = 0.1):
         self.width = width
@@ -23,12 +14,10 @@ class Leds:
         self.strips = [
             Pi5Neo('/dev/spidev0.0', 600, 800),
             Pi5Neo('/dev/spidev5.0', 600, 800)
-            #neopixel.NeoPixel_SPI(busio.SPI(board.SCK), 600, auto_write=False, frequency=5120000, reset_time=0.005),
-            #neopixel.NeoPixel_SPI(busio.SPI(15), 600, auto_write=False, frequency=5120000, reset_time=0.005)
         ]
 
     def get_strip(self, x, y):
-        return self.strips[(x + y * self.width >= LED_1_COUNT) * 1]
+        return self.strips[(x + y * self.width >= 600) * 1]
 
     def get_pixel_index(self, x, y):
         reversed = (y % 2 == 0)
@@ -36,7 +25,7 @@ class Leds:
             index = x + y * self.width
         else:
             index = (self.width - x - 1) + y * self.width
-        return index % LED_1_COUNT
+        return index % 600
 
     def set_pixel_color(self, x, y, r, g, b):
         strip = self.get_strip(x, y)

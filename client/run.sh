@@ -19,7 +19,7 @@ if [ ! -d ".venv" ]; then
     source .venv/bin/activate
     pip install -r requirements.txt
 else
-    source venv/bin/activate
+    source .venv/bin/activate
 fi
 
 sudo apt install python3-pyaudio

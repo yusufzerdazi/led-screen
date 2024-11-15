@@ -4,7 +4,7 @@ paho-mqtt
 pyppeteer
 asyncio
 requests
-numpy
+numpy==1.26.4
 selenium
 sounddevice
 SpeechRecognition
