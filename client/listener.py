@@ -27,6 +27,10 @@ class SpeechRecognizer:
 
         self.pool = futures.ThreadPoolExecutor(thread_name_prefix="Rec Thread")
         self.speech = []
+        
+        # Add conversation history
+        self.conversation_history = []
+        self.max_history = 5  # Keep last 5 exchanges
 
     def recognize_audio_thread_pool(self, audio, event=None):
         future = self.pool.submit(self.recognize_audio, audio)
@@ -52,15 +56,41 @@ class SpeechRecognizer:
                     language="en"
                 )
 
+            # Check word count
+            word_count = len(speech.split())
+            if word_count <= 2:
+                print(f"Too few words detected ({word_count}), ignoring: {speech}")
+                return speech
+
+            # Build conversation history for context
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a live code visuliser called Easel-E. You generate code using the Hydra visuliser found at hydra.ojack.xyz. Every subsequent message will be a prompt, to which you will respond with a working code that will be run in the hydra visualiser. Please use the audio input to make the visual sound reactive."
+                }
+            ]
+            
+            # Add conversation history
+            for past_message in self.conversation_history:
+                messages.append(past_message)
+            
+            # Add retry context if needed
+            if "retry" in speech.lower():
+                messages.append({
+                    "role": "system",
+                    "content": "The previous visualization failed or showed a black screen. Please generate a different visualization that is more likely to work. Prefer simpler, well-tested patterns and avoid experimental features."
+                })
+            
+            # Add current message
+            user_message = {
+                "role": "user",
+                "content": speech
+            }
+            messages.append(user_message)
+
             completion = client.chat.completions.create(
                 model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": "You are a live code visuliser called Easel-E. You generate code using the Hydra visuliser found at hydra.ojack.xyz. Every subsequent message will be a prompt, to which you will respond with a working code that will be run in the hydra visualiser. Please use the audio input to make the visual sound reactive."},
-                    {
-                        "role": "user",
-                        "content": speech
-                    }
-                ],
+                messages=messages,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -91,6 +121,18 @@ class SpeechRecognizer:
                     }
                 }
             )
+
+            # Update conversation history
+            self.conversation_history.append(user_message)
+            assistant_message = {
+                "role": "assistant",
+                "content": completion.choices[0].message.content
+            }
+            self.conversation_history.append(assistant_message)
+            
+            # Trim history if too long
+            if len(self.conversation_history) > self.max_history * 2:  # *2 because each exchange has 2 messages
+                self.conversation_history = self.conversation_history[-self.max_history * 2:]
 
             messager.send_message(json.dumps({"type": "hydra", "content": completion.choices[0].message.content}))
 

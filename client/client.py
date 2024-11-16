@@ -64,12 +64,23 @@ class Client:
         self.leds = leds
         self.text_scroller = TextScroller(self.width, self.height)
         self.display_mode = None
-        self.queued_url = None
         
         # Add cooldown tracking
         self.last_visualization_time = 0
         self.cooldown_period = 120  # 2 minutes in seconds
-    
+        
+        # Add monitoring variables
+        self.last_frame = None
+        self.static_frame_count = 0
+        self.max_static_frames = 100  # About 5 seconds at 0.05s refresh rate
+        self.failure_quips = [
+            "That's never happened before :(",
+            "Oops, my bad!",
+            "Let me try again...",
+            "Well this is awkward",
+            "Time for Plan B!"
+        ]
+
     def can_show_visualization(self):
         """Check if enough time has passed since last visualization"""
         current_time = time.time()
@@ -247,13 +258,71 @@ class Client:
 
       
     def website_display(self):
-        image = self.driver.get_screenshot_as_base64()
-        self.bytes_display(image)
-        #pass
-        # with lock:
-        #     await self.page.screenshot(path='web.png')
-        #     time.sleep(1)
-        #     self.pil_display(Image.open("web.png"))
+        try:
+            image = self.driver.get_screenshot_as_base64()
+            frame = Image.open(BytesIO(base64.b64decode(image)))
+            
+            # Check if frame is static (black or single color)
+            is_static = self.check_static_frame(frame)
+            
+            if is_static:
+                self.static_frame_count += 1
+                if self.static_frame_count >= self.max_static_frames:
+                    self.handle_visualization_failure()
+                    return
+            else:
+                self.static_frame_count = 0
+                
+            self.last_frame = frame
+            self.bytes_display(image)
+            
+        except Exception as e:
+            print(f"Error in website display: {e}")
+            self.handle_visualization_failure()
+
+    def check_static_frame(self, frame):
+        """Check if frame is static (black or single color)"""
+        try:
+            # Resize for faster processing
+            small_frame = frame.resize((4, 3), Image.LANCZOS)
+            pixels = list(small_frame.getdata())
+            
+            # Check if all pixels are the same or black
+            first_pixel = pixels[0]
+            is_black = first_pixel == (0, 0, 0)
+            all_same = all(pixel == first_pixel for pixel in pixels)
+            
+            return is_black or all_same
+        except Exception as e:
+            print(f"Error checking frame: {e}")
+            return False
+
+    def handle_visualization_failure(self):
+        """Handle failed visualization by showing quip and requesting new one"""
+        print("Visualization failed, requesting new one")
+        
+        # Reset counters
+        self.static_frame_count = 0
+        self.last_frame = None
+        
+        # Show failure quip
+        import random
+        failure_quip = random.choice(self.failure_quips)
+        self.text_scroller.start_scroll(failure_quip)
+        self.display_mode = 'scroll'
+        
+        # Request new visualization with retry prompt
+        retry_message = {
+            "type": "hydra",
+            "content": json.dumps({
+                "code": "",
+                "description": "Previous visualization failed",
+                "quip": failure_quip,
+                "display": True,
+                "retry": True
+            })
+        }
+        self.mqtt.client.publish("mqtt/led-screen", json.dumps(retry_message))
 
 def start(args, client):
     while True:
