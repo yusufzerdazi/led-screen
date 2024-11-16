@@ -134,3 +134,32 @@ class AiHelper:
         except Exception as e:
             print(f"Error generating visualization: {e}")
             return None
+
+    def generate_greeting(self):
+        """Generate a startup greeting message"""
+        try:
+            completion = client.chat.completions.create(
+                model="gpt-4",
+                messages=[{
+                    "role": "system",
+                    "content": """You are Easel-E, a visual synthesizer at Burning Man. 
+                    Generate a short startup greeting (2-3 lines) to introduce yourself.
+                    Make references to:
+                    - Your name (Easel-E)
+                    - Your purpose (creating visuals from speech)
+                    - Burning Man themes
+                    
+                    Format it like a retro computer boot sequence.
+                    Example:
+                    EASEL-E VISUAL CORTEX ONLINE
+                    READY TO TRANSFORM PLAYA VIBES
+                    SPEAK TO CREATE DIGITAL DREAMS
+                    
+                    Keep it playful and robot-like."""
+                }],
+                max_tokens=60
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            print(f"Error generating greeting: {e}")
+            return "EASEL-E ONLINE\nREADY TO CREATE"

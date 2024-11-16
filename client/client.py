@@ -117,6 +117,11 @@ class Client:
     def init(self):
         self.mqtt.connect()
         self.leds.init()
+        
+        # Show startup greeting
+        greeting = self.ai_helper.generate_greeting()
+        self.text_scroller.start_scroll(greeting)
+        self.display_mode = 'scroll'
 
     def load_camera(self):
         self.camera = Picamera2()
