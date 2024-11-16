@@ -137,7 +137,7 @@ class Client:
         """Update the Hydra editor with new code without page reload"""
         try:
             # Find and click the editor container
-            editor = self.driver.find_element(By.ID, "editor-container")
+            editor = self.driver.find_element(By.CLASS_NAME, "CodeMirror")
             editor.click()
             
             # Send keyboard shortcuts for select all (Ctrl+A) and delete
@@ -151,8 +151,8 @@ class Client:
             run_button = self.driver.find_element(By.ID, "run-icon")
             run_button.click()
             
-        except Exception as e:
-            print(f"Error updating code: {e}")
+        except Exception as e2:
+            print(f"Error with fallback method: {e2}")
 
     def on_message(self, client, userdata, msg):
         decoded = json.loads(msg.payload.decode())

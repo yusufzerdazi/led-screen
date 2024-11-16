@@ -26,7 +26,11 @@ class TextScroller:
         text_bbox = draw.textbbox((0, 0), self.current_text, font=self.font)
         text_width = text_bbox[2] - text_bbox[0]
         text_height = text_bbox[3] - text_bbox[1]
+        
         y_position = (self.height - text_height) // 2
+        
+        baseline_adjustment = text_height * 0.1
+        y_position = y_position - baseline_adjustment
         
         draw.text((self.scroll_position, y_position), self.current_text, font=self.font, fill=(255, 255, 255))
         
