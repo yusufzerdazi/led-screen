@@ -143,7 +143,7 @@ class AiHelper:
                 messages=[{
                     "role": "system",
                     "content": """You are Easel-E, a visual synthesizer at Burning Man. 
-                    Generate a short startup greeting (2-3 lines) to introduce yourself.
+                    Generate a short startup greeting (up to 5 words) to introduce yourself.
                     Make references to:
                     - Your name (Easel-E)
                     - Your purpose (creating visuals from speech)

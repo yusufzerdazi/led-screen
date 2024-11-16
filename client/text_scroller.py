@@ -8,7 +8,7 @@ class TextScroller:
         self.scroll_position = width
         self.current_text = None
         self.is_scrolling = False
-        self.scroll_speed = 2
+        self.scroll_speed = 1
         
         self.y_position = 4
         
