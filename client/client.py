@@ -67,6 +67,10 @@ class Client:
         self.server = server
         self.mqtt = mqtt.Mqtt(self.on_message)
         self.leds = leds
+        
+        # Set strip delay for synchronization (adjust as needed)
+        self.leds.set_strip_delay(0.001)  # 1ms delay between strips
+        
         self.text_scroller = TextScroller(self.width, self.height)
         self.display_mode = None
                 

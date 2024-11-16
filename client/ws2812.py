@@ -16,6 +16,15 @@ class Leds:
             Pi5Neo('/dev/spidev5.0', 600, 800)
         ]
 
+        self.strips[0].strip_delay = 0.0
+        self.strips[1].strip_delay = 0.5
+        
+        # Add delay between strip updates (in seconds)
+        self.strip_delay = 0.0
+        
+        # Create thread pool for parallel updates
+        self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
     def get_strip(self, x, y):
         return self.strips[(x + y * self.width >= 600) * 1]
 
@@ -31,8 +40,6 @@ class Leds:
         strip = self.get_strip(x, y)
         index = self.get_pixel_index(x, y)
         strip.set_led_color(index, min(int(r * self.brightness), 255), min(int(g * self.brightness), 255), min(int(b * self.brightness), 255))
-        #strip[index] = (min(int(r * self.brightness), 255), min(int(g * self.brightness), 255), min(int(b * self.brightness), 255))
-        
 
     def blackout(self):
         for strip in self.strips:
@@ -51,18 +58,27 @@ class Leds:
         thread = threading.Thread(target=self.loop)
         thread.start()
 
-    def show(self):
+    def update_strip(self, strip):
+        """Update a single strip"""
         with lock:
-           t1 = threading.Thread(target=self.strips[0].update_strip())
-           t2 = threading.Thread(target=self.strips[1].update_strip())
+            if strip.strip_delay > 0:
+                time.sleep(strip.strip_delay)
+            strip.update_strip()
 
-           t1.start()
-           t2.start()
-
-           t1.join()
-           t2.join()
-
+    def show(self):
+        """Update all strips in parallel"""
+        # Submit both strip updates to thread pool
+        futures = [
+            self.pool.submit(self.update_strip, strip)
+            for strip in self.strips
+        ]
+        # Wait for both updates to complete
+        concurrent.futures.wait(futures)
 
     def init(self):
         self.blackout()
         self.show()
+        
+    def set_strip_delay(self, delay):
+        """Set the delay between strip updates in seconds"""
+        self.strip_delay = delay

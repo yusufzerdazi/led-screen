@@ -11,7 +11,7 @@ class TextScroller:
         self.is_scrolling = False
         self.scroll_speed = 2
         
-        self.y_position = 6
+        self.y_position = 4
         
     def start_scroll(self, text):
         self.current_text = text.upper()
