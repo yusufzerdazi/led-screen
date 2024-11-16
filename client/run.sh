@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd /home/yusuf/Code/led-screen/client
+
 # Function to handle cleanup on script exit
 cleanup() {
     echo "Shutting down services..."
