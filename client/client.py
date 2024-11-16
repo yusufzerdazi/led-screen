@@ -133,10 +133,9 @@ class Client:
             self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
             
-            # Hide close icon
+            # Hide close icon using jQuery
             try:
-                close_icon = self.driver.find_element(By.ID, "close-icon")
-                close_icon.click()
+                self.driver.execute_script("$('#close-icon').click()")
             except Exception as e:
                 print(f"Error hiding close icon: {e}")
 
