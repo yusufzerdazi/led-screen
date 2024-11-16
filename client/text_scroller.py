@@ -5,16 +5,16 @@ class TextScroller:
     def __init__(self, width, height):
         self.width = width
         self.height = height
-        self.font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 16)
+        self.font = ImageFont.truetype('slkscr.ttf', 16)
         self.scroll_position = width
         self.current_text = None
         self.is_scrolling = False
-        self.scroll_speed = 4
+        self.scroll_speed = 2
         
-        self.y_position = 8
+        self.y_position = 6
         
     def start_scroll(self, text):
-        self.current_text = text
+        self.current_text = text.upper()
         self.scroll_position = self.width
         self.is_scrolling = True
         

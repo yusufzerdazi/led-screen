@@ -8,6 +8,7 @@ import requests
 import socket
 import io
 import urllib.parse
+import random
 
 # from pyppeteer import launchimport socket
 
@@ -82,6 +83,16 @@ class Client:
         self.monitor_thread = Thread(target=self.monitor_display)
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
+        
+        # Add variables for random interjections
+        self.last_interjection_time = time.time()
+        self.interjection_period = 300  # 5 minutes between random interjections
+        self.interjection_chance = 0.2  # 20% chance when period has passed
+        
+        # Start interjection thread
+        self.interjection_thread = Thread(target=self.check_interjections)
+        self.interjection_thread.daemon = True
+        self.interjection_thread.start()
 
     def monitor_display(self):
         """Thread function to monitor display for static frames"""
@@ -300,11 +311,30 @@ class Client:
         
         self.update_hydra_code()
 
+    def check_interjections(self):
+        """Thread to occasionally inject random quips"""
+        while self.monitoring_active:
+            current_time = time.time()
+            if (current_time - self.last_interjection_time >= self.interjection_period and 
+                random.random() < self.interjection_chance):
+                
+                # Only interject if we're not already scrolling text
+                if self.display_mode != 'scroll':
+                    quip = self.ai_helper.generate_random_quip()
+                    if quip:
+                        self.text_scroller.start_scroll(quip)
+                        self.display_mode = 'scroll'
+                        self.last_interjection_time = current_time
+            
+            time.sleep(10)  # Check every 10 seconds
+
     def cleanup(self):
         """Stop monitoring thread and cleanup"""
         self.monitoring_active = False
         if hasattr(self, 'monitor_thread'):
             self.monitor_thread.join(timeout=1.0)
+        if hasattr(self, 'interjection_thread'):
+            self.interjection_thread.join(timeout=1.0)
 
 def start(args, client):
     while True:

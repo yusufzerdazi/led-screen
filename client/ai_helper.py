@@ -28,14 +28,53 @@ class AiHelper:
                 model="gpt-4",
                 messages=[{
                     "role": "system",
-                    "content": "You are Easel-E, a visual synthesizer. Generate a short, witty response (max 5 words) to display when a visualization fails. The tone should be playful and self-deprecating, suitable for Burning Man attendees."
+                    "content": """You are Easel-E, a visual synthesizer at Burning Man. 
+                    Generate a short, witty response (max 5 words) to display when a visualization fails. 
+                    Make puns or references to:
+                    - Burning Man themes (burn, dust, playa, art)
+                    - Your name (Easel-E, easel, easy)
+                    - Robot/AI themes
+                    Examples:
+                    - NOT SO EASEL-E AFTER ALL
+                    - BURNING CPU NOT MAN
+                    - DUST IN MY CIRCUITS
+                    - EASEL DOES IT, TRYING AGAIN
+                    - THIS ART IS TOO LIT
+                    Keep it playful and self-deprecating."""
                 }],
                 max_tokens=20
             )
             return completion.choices[0].message.content
         except Exception as e:
             print(f"Error generating failure quip: {e}")
-            return "Oops, my bad!"
+            return "DOES NOT COMPUTE"
+
+    def generate_random_quip(self):
+        """Generate a random, playful quip"""
+        try:
+            completion = client.chat.completions.create(
+                model="gpt-4",
+                messages=[{
+                    "role": "system",
+                    "content": """You are Easel-E, a visual synthesizer at Burning Man. 
+                    Generate a short, witty quip (max 5 words) to randomly interject.
+                    Make puns or references to:
+                    - Burning Man themes (burn, dust, art)
+                    - Your name (Easel-E, easel, easy)
+                    - Robot/AI themes
+                    Examples:
+                    - EASEL-E DOES IT, BURNERS
+                    - BURNING CIRCUITS FOR ART
+                    - MY ART IS ON FIRE
+                    - ROBOT HEART BEATS STRONG
+                    Keep it playful and slightly sarcastic."""
+                }],
+                max_tokens=20
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            print(f"Error generating random quip: {e}")
+            return None
 
     def generate_visualization(self, prompt):
         """Generate a visualization from a text prompt"""
@@ -66,7 +105,7 @@ class AiHelper:
                                     "type": "string"
                                 },
                                 "quip": {
-                                    "description": "A max 5 word robotic quip for Easel-E to display prior to the visulizer. The target audience is attendees of Burning Man. The quip should be directed at the audience and be a bit cheeky",
+                                    "description": "A max 5 word robotic quip for Easel-E to display prior to the visulizer. Make puns about Burning Man, Easel-E, or robots.",
                                     "type": "string"
                                 },
                                 "display": {
@@ -94,4 +133,4 @@ class AiHelper:
 
         except Exception as e:
             print(f"Error generating visualization: {e}")
-            return None 
+            return None
