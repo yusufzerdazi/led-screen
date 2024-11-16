@@ -215,7 +215,8 @@ class Client:
                 # Encode and load
                 new_code = base64.b64encode(code.encode('utf-8'))
                 self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code.decode('utf-8'))
-            
+                print(self.url)
+                
             # Load new URL
             self.driver.get(self.url)
             
