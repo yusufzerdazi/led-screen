@@ -7,6 +7,8 @@ import argparse
 import requests
 import socket
 import io
+import urllib.parse
+
 # from pyppeteer import launchimport socket
 
 from picamera2 import Picamera2
@@ -130,30 +132,8 @@ class Client:
             self.driver.get(self.url)
             
             # Hide UI elements
-            # self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
+            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
-            
-            # Inject jQuery if not present and click close icon
-            try:
-                jquery_js = """
-                    if (typeof jQuery === 'undefined') {
-                        var script = document.createElement('script');
-                        script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
-                        document.head.appendChild(script);
-                        // Wait for jQuery to load
-                        return new Promise((resolve) => {
-                            script.onload = () => {
-                                jQuery('#close-icon').click();
-                                resolve();
-                            };
-                        });
-                    } else {
-                        jQuery('#close-icon').click();
-                    }
-                """
-                self.driver.execute_script(jquery_js)
-            except Exception as e:
-                print(f"Error injecting jQuery and hiding close icon: {e}")
 
     def update_hydra_code(self, code):
         """Update the Hydra editor with new code by reloading with code parameter"""
@@ -161,7 +141,7 @@ class Client:
             # Encode code as base64 and construct URL
             print(code)
             new_code = base64.b64encode(code.encode('utf-8'))
-            self.url = "http://localhost:5173?code=" + new_code.decode('utf-8')
+            self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code.decode('utf-8'))
 
             print(self.url)
             
