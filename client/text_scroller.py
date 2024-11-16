@@ -9,7 +9,9 @@ class TextScroller:
         self.scroll_position = width
         self.current_text = None
         self.is_scrolling = False
-        self.scroll_speed = 2
+        self.scroll_speed = 4
+        
+        self.y_position = 8
         
     def start_scroll(self, text):
         self.current_text = text
@@ -23,19 +25,12 @@ class TextScroller:
         image = Image.new('RGB', (self.width, self.height), (0, 0, 0))
         draw = ImageDraw.Draw(image)
         
-        text_bbox = draw.textbbox((0, 0), self.current_text, font=self.font)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3] - text_bbox[1]
-        
-        y_position = (self.height - text_height) // 2
-        
-        baseline_adjustment = text_height * 0.1
-        y_position = y_position - baseline_adjustment
-        
-        draw.text((self.scroll_position, y_position), self.current_text, font=self.font, fill=(255, 255, 255))
+        draw.text((self.scroll_position, self.y_position), self.current_text, font=self.font, fill=(255, 255, 255))
         
         self.scroll_position -= self.scroll_speed
         
+        text_bbox = draw.textbbox((0, 0), self.current_text, font=self.font)
+        text_width = text_bbox[2] - text_bbox[0]
         if self.scroll_position < -text_width:
             self.is_scrolling = False
             

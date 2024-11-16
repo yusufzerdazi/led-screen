@@ -28,6 +28,8 @@ from selenium.webdriver.common.keys import Keys
 
 from text_scroller import TextScroller
 
+from ai_helper import AiHelper
+
 # Configure ChromeOptions
 chrome_options = Options()
 chrome_options.add_argument("--headless")  # Run in headless mode
@@ -75,14 +77,32 @@ class Client:
         self.last_frame = None
         self.static_frame_count = 0
         self.max_static_frames = 100  # About 5 seconds at 0.05s refresh rate
-        self.failure_quips = [
-            "That's never happened before :(",
-            "Oops, my bad!",
-            "Let me try again...",
-            "Well this is awkward",
-            "Time for Plan B!"
-        ]
+        self.monitoring_active = True
+        
+        # Initialize AI helper
+        self.ai_helper = AiHelper()
+        
+        # Start monitoring thread
+        self.monitor_thread = Thread(target=self.monitor_display)
+        self.monitor_thread.daemon = True
+        self.monitor_thread.start()
 
+    def monitor_display(self):
+        """Thread function to monitor display for static frames"""
+        while self.monitoring_active:
+            if self.display_mode == 'website' and self.last_frame is not None:
+                try:
+                    # Check if frame is static
+                    if self.check_static_frame(self.last_frame):
+                        self.static_frame_count += 1
+                        if self.static_frame_count >= self.max_static_frames:
+                            self.handle_visualization_failure()
+                    else:
+                        self.static_frame_count = 0
+                except Exception as e:
+                    print(f"Error in monitor thread: {e}")
+            time.sleep(0.1)  # Check every 100ms
+    
     def can_show_visualization(self):
         """Check if enough time has passed since last visualization"""
         current_time = time.time()
@@ -257,21 +277,8 @@ class Client:
         try:
             image = self.driver.get_screenshot_as_base64()
             frame = Image.open(BytesIO(base64.b64decode(image)))
-            
-            # Check if frame is static (black or single color)
-            is_static = self.check_static_frame(frame)
-            
-            if is_static:
-                self.static_frame_count += 1
-                if self.static_frame_count >= self.max_static_frames:
-                    self.handle_visualization_failure()
-                    return
-            else:
-                self.static_frame_count = 0
-                
             self.last_frame = frame
             self.bytes_display(image)
-            
         except Exception as e:
             print(f"Error in website display: {e}")
             self.handle_visualization_failure()
@@ -301,13 +308,18 @@ class Client:
         self.static_frame_count = 0
         self.last_frame = None
         
-        # Show failure quip
-        import random
-        failure_quip = random.choice(self.failure_quips)
+        # Get AI-generated failure quip
+        failure_quip = self.ai_helper.generate_failure_quip()
         self.text_scroller.start_scroll(failure_quip)
         self.display_mode = 'scroll'
         
         self.update_hydra_code()
+
+    def cleanup(self):
+        """Stop monitoring thread and cleanup"""
+        self.monitoring_active = False
+        if hasattr(self, 'monitor_thread'):
+            self.monitor_thread.join(timeout=1.0)
 
 def start(args, client):
     while True:
@@ -316,6 +328,7 @@ def start(args, client):
         time.sleep(0.05)  # Small delay to control refresh rate
 
 if __name__ == '__main__':
+    client = None
     try:
         parser = argparse.ArgumentParser(description='LED Screen Client')
         parser.add_argument('--website', metavar='N', type=str, nargs='+',
@@ -346,15 +359,17 @@ if __name__ == '__main__':
             client.display_mode = 'dashboard'
 
         client.init()
-        #client.leds.start()
 
         thread = Thread(target=start, args=(args, client))
         thread.start()
-        
+        thread.join()
 
     except KeyboardInterrupt:
         print("Exiting LED client")
-        if(args.mode == "camera"):
-            client.camera.stop()
-        client.leds.blackout()
-        client.leds.show()
+    finally:
+        if client:
+            if(args.mode == "camera"):
+                client.camera.stop()
+            client.cleanup()  # Stop monitoring thread
+            client.leds.blackout()
+            client.leds.show()

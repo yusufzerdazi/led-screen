@@ -6,6 +6,7 @@ import json
 from messager import PiMessager
 from dotenv import load_dotenv
 import time
+from ai_helper import AiHelper
 
 # Load environment variables
 load_dotenv()
@@ -29,24 +30,13 @@ class SpeechRecognizer:
         self.pool = futures.ThreadPoolExecutor(thread_name_prefix="Rec Thread")
         self.speech = []
         
-        # Add conversation history
-        self.max_history = 50  # Keep last 50 exchanges
-
-        self.messages = [
-            {
-                "role": "system",
-                "content": """You are a live code visuliser called Easel-E. 
-                You generate code using the Hydra visuliser found at hydra.ojack.xyz. 
-                Every subsequent message will be a prompt, to which you will respond with a working code that will be run in the hydra visualiser. 
-                Please use the audio input to make the visual sound reactive.
-                Please hide the fft bins by not calling a.show()."""
-            }
-        ]
-
         # Add accumulation variables
         self.accumulated_speech = []
         self.last_translation_time = time.time()
         self.accumulation_period = 120  # 2 minutes in seconds
+
+        # Initialize AI helper
+        self.ai_helper = AiHelper()
 
     def recognize_audio_thread_pool(self, audio, event=None):
         future = self.pool.submit(self.recognize_audio, audio)
@@ -88,58 +78,10 @@ class SpeechRecognizer:
                 combined_speech = " ".join(self.accumulated_speech)
                 print(f"Processing accumulated speech: {combined_speech}")
                 
-                # Add current message
-                user_message = {
-                    "role": "user",
-                    "content": combined_speech
-                }
-                self.messages.append(user_message)
-
-                completion = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=self.messages,
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "code_schema",
-                            "schema": {
-                                "type": "object",
-                                "required": ["code", "description", "quip", "display"],
-                                "properties": {
-                                    "code": {
-                                        "description": "The actual code content",
-                                        "type": "string"
-                                    },
-                                    "description": {
-                                        "description": "A description of what it displays",
-                                        "type": "string"
-                                    },
-                                    "quip": {
-                                        "description": "A max 5 word robotic quip for Easel-E to display prior to the visulizer. The target audience is attendees of Burning Man. The quip should be directed at the audience and be a bit cheeky",
-                                        "type": "string"
-                                    },
-                                    "display": {
-                                        "description": "Whether the prompt would make a cool visual or not. If a random word was picked up it should not display on screen.",
-                                        "type": "boolean"
-                                    }
-                                },
-                                "additionalProperties": False
-                            }
-                        }
-                    }
-                )
-
-                # Update conversation history
-                self.messages.append({
-                    "role": "assistant",
-                    "content": completion.choices[0].message.content
-                })
-                
-                # Trim history if too long
-                if len(self.messages) > self.max_history * 2:
-                    self.messages = [self.messages[0]] + self.messages[-self.max_history * 2:]
-
-                messager.send_message(json.dumps({"type": "hydra", "content": completion.choices[0].message.content}))
+                # Generate visualization using AI helper
+                response = self.ai_helper.generate_visualization(combined_speech)
+                if response:
+                    messager.send_message(json.dumps({"type": "hydra", "content": response}))
 
                 # Reset accumulation
                 self.accumulated_speech = []
