@@ -18,19 +18,6 @@ class AiHelper:
                 You can use a live camera feed by adding:
                 s0.initImage("CAMERA_FEED_TOKEN")
                 
-                When using the camera feed:
-                - Rotate it 180 degrees using .rotate(Math.PI)
-                - Adjust brightness with .brightness(1.2)
-                - Add .scale(1,-1) to flip vertically
-                
-                Example with camera:
-                s0.initImage("CAMERA_FEED_TOKEN")
-                    .rotate(Math.PI)
-                    .scale(1,-1)
-                    .brightness(1.2)
-                    .saturate(1.2)
-                    .modulate(osc(3,0.1))
-                
                 Every subsequent message will be a prompt, to which you will respond with a working code that will be run in the hydra visualiser. 
                 Please use the audio input to make the visual sound reactive.
                 Please hide the fft bins by not calling a.show().
