@@ -175,6 +175,30 @@ class Client:
             self.driver.set_window_size(240, 160)
             self.driver.get(self.url)
             
+            # Inject jQuery
+            jquery_js = """
+                if (typeof jQuery === 'undefined') {
+                    var script = document.createElement('script');
+                    script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
+                    document.head.appendChild(script);
+                }
+            """
+            self.driver.execute_script(jquery_js)
+            
+            # Wait for jQuery to load
+            self.driver.execute_script("""
+                return new Promise((resolve) => {
+                    function checkJQuery() {
+                        if (window.jQuery) {
+                            resolve();
+                        } else {
+                            setTimeout(checkJQuery, 100);
+                        }
+                    }
+                    checkJQuery();
+                });
+            """)
+            
             # Hide UI elements
             self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
@@ -189,7 +213,7 @@ class Client:
                 buffer = BytesIO()
                 
                 # Capture directly to buffer with small size
-                self.camera.capture_file(buffer, format='png', main={"size": (120, 80)})
+                self.camera.capture_file(buffer, format='png')
                 buffer.seek(0)
                 
                 # Convert to base64
@@ -203,29 +227,34 @@ class Client:
             print(f"Error updating camera snapshot: {e}")
 
     def update_hydra_code(self, code=None):
-        """Update the Hydra editor with new code by reloading with code parameter"""
+        """Update the Hydra editor with new code"""
         try:
             if code is None:
                 self.url = "http://localhost:5173"
-            else:
-                # Update camera snapshot
-                self.update_camera_snapshot()
+                return
                 
-                # Replace camera token with actual snapshot if present
-                if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
-                    code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
-                
-                # Encode and load
-                new_code = base64.b64encode(code.encode('utf-8'))
-                self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code.decode('utf-8'))
-                print(self.url)
-
-            # Load new URL
-            self.driver.get(self.url)
+            # Update camera snapshot
+            self.update_camera_snapshot()
             
-            # Hide UI elements again after reload
-            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
-            self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+            # Replace camera token with actual snapshot if present
+            if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
+                code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
+            
+            # Use jQuery to update editor and run code
+            js_code = f"""
+                // Click editor
+                $('.CodeMirror').click();
+                
+                // Select all text and delete
+                $('.CodeMirror')[0].CodeMirror.setValue('');
+                
+                // Set new code
+                $('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
+                
+                // Click run button
+                $('#run-icon').click();
+            """
+            self.driver.execute_script(js_code)
             
         except Exception as e:
             print(f"Error updating code: {e}")
