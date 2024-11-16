@@ -217,7 +217,7 @@ class Client:
                 buffer.seek(0)
                 
                 # Convert to base64
-                base64_image = base64.b64encode(buffer.getvalue()).decode()
+                base64_image = base64.b64encode(buffer.getvalue()).decode('utf-8')
                 
                 # Store with data URL prefix for PNG
                 self.camera_snapshot = "data:image/jpeg;base64, " + base64_image
