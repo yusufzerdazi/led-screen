@@ -34,7 +34,7 @@ sleep 5
 
 # Start the LED client with local Hydra URL
 echo "Starting LED client..."
-python3 client.py --mode website --website http://localhost:5173?code=czAuaW5pdEltYWdlKCUyMkNBTUVSQV9GRUVEX1RPS0VOJTIyKSUwQW9zYyg2KS5tb2R1bGF0ZShzcmMoczApJTJDMSkub3V0KG8wKQ%3D%3D &
+python3 client.py --mode website --website http://localhost:5173 &
 
 # Start the speech recognition listener
 echo "Starting speech listener..."

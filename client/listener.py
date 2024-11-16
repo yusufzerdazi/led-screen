@@ -65,8 +65,8 @@ class SpeechRecognizer:
             # Check word count and filter out unwanted phrases
             word_count = len(speech.split())
             speech_lower = speech.lower()
-            if word_count < 2 or "thanks" in speech_lower:
-                print(f"Ignored speech ({word_count} words): {speech}")
+            if "thanks" in speech_lower or "beadaholique" in speech_lower:
+                print(f"Ignored speech: {speech}")
                 return speech
 
             # Add to accumulation
