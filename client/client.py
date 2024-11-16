@@ -185,12 +185,15 @@ class Client:
             # Only update if enough time has passed
             current_time = time.time()
             if current_time - self.camera_snapshot_time >= self.camera_snapshot_interval:
-                # Capture to file
-                self.camera.capture_file("camera_snapshot.png", format='png')
+                # Create a temporary buffer for the image
+                buffer = BytesIO()
                 
-                # Read file and convert to base64
-                with open("camera_snapshot.png", "rb") as image_file:
-                    base64_image = base64.b64encode(image_file.read()).decode()
+                # Capture directly to buffer with small size
+                self.camera.capture_file(buffer, format='png', main={"size": (120, 80)})
+                buffer.seek(0)
+                
+                # Convert to base64
+                base64_image = base64.b64encode(buffer.getvalue()).decode()
                 
                 # Store with data URL prefix for PNG
                 self.camera_snapshot = "data:image/png;base64," + base64_image
