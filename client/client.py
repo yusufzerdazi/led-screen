@@ -188,13 +188,12 @@ class Client:
 
     def update_display(self):
         """Main display update method"""
-        if self.display_mode == 'scroll' and self.text_scroller.is_scrolling:
-            frame = self.text_scroller.get_frame()
-            if frame:
-                print("frame")
-                self.pil_display(frame)
+        if self.display_mode == 'scroll':
+            if self.text_scroller.is_scrolling:
+                frame = self.text_scroller.get_frame()
+                if frame:
+                    self.pil_display(frame)
             else:
-                print("back again")
                 self.display_mode = 'website'
         elif self.display_mode == 'website':
             self.website_display()
