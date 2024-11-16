@@ -76,7 +76,7 @@ class Client:
         # Add monitoring variables
         self.last_frame = None
         self.static_frame_count = 0
-        self.max_static_frames = 100  # About 5 seconds at 0.05s refresh rate
+        self.max_static_frames = 5  # About 5 seconds at 0.05s refresh rate
         self.monitoring_active = True
         
         # Initialize AI helper
@@ -101,7 +101,7 @@ class Client:
                         self.static_frame_count = 0
                 except Exception as e:
                     print(f"Error in monitor thread: {e}")
-            time.sleep(0.1)  # Check every 100ms
+            time.sleep(1)  # Check every 1s
     
     def can_show_visualization(self):
         """Check if enough time has passed since last visualization"""
