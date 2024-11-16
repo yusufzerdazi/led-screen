@@ -133,32 +133,63 @@ class Client:
             self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
             
-            # Hide close icon using jQuery
+            # Inject jQuery if not present and click close icon
             try:
-                self.driver.execute_script("$('#close-icon').click()")
+                jquery_js = """
+                    if (typeof jQuery === 'undefined') {
+                        var script = document.createElement('script');
+                        script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
+                        document.head.appendChild(script);
+                        // Wait for jQuery to load
+                        return new Promise((resolve) => {
+                            script.onload = () => {
+                                jQuery('#close-icon').click();
+                                resolve();
+                            };
+                        });
+                    } else {
+                        jQuery('#close-icon').click();
+                    }
+                """
+                self.driver.execute_script(jquery_js)
             except Exception as e:
-                print(f"Error hiding close icon: {e}")
+                print(f"Error injecting jQuery and hiding close icon: {e}")
 
     def update_hydra_code(self, code):
         """Update the Hydra editor with new code without page reload"""
         try:
-            # Find and click the editor container
-            editor = self.driver.find_element(By.CLASS_NAME, "CodeMirror")
-            editor.click()
+            # Use jQuery to find and interact with elements, ensuring jQuery is loaded
+            js_code = f"""
+                if (typeof jQuery === 'undefined') {{
+                    var script = document.createElement('script');
+                    script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
+                    document.head.appendChild(script);
+                    // Wait for jQuery to load
+                    script.onload = () => {{
+                        // Click editor
+                        jQuery('.CodeMirror').click();
+                        
+                        // Select all text and delete
+                        jQuery('.CodeMirror')[0].CodeMirror.setValue('');
+                        
+                        // Set new code
+                        jQuery('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
+                        
+                        // Click run button
+                        jQuery('#run-icon').click();
+                    }};
+                }} else {{
+                    // jQuery already loaded
+                    jQuery('.CodeMirror').click();
+                    jQuery('.CodeMirror')[0].CodeMirror.setValue('');
+                    jQuery('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
+                    jQuery('#run-icon').click();
+                }}
+            """
+            self.driver.execute_script(js_code)
             
-            # Send keyboard shortcuts for select all (Ctrl+A) and delete
-            editor.send_keys(Keys.CONTROL + 'a')
-            editor.send_keys(Keys.DELETE)
-            
-            # Type the new code
-            editor.send_keys(code)
-            
-            # Find and click the run button
-            run_button = self.driver.find_element(By.ID, "run-icon")
-            run_button.click()
-            
-        except Exception as e2:
-            print(f"Error with fallback method: {e2}")
+        except Exception as e:
+            print(f"Error updating code: {e}")
 
     def on_message(self, client, userdata, msg):
         decoded = json.loads(msg.payload.decode())
