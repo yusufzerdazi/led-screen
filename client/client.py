@@ -135,13 +135,15 @@ class Client:
             self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
 
-    def update_hydra_code(self, code):
+    def update_hydra_code(self, code=None):
         """Update the Hydra editor with new code by reloading with code parameter"""
         try:
             # Encode code as base64 and construct URL
-            print(code)
-            new_code = base64.b64encode(code.encode('utf-8'))
-            self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code.decode('utf-8'))
+            if code is None:
+                self.url = "http://localhost:5173"
+            else:
+                new_code = base64.b64encode(code.encode('utf-8'))
+                self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code.decode('utf-8'))
             
             # Load new URL
             self.driver.get(self.url)
@@ -305,18 +307,7 @@ class Client:
         self.text_scroller.start_scroll(failure_quip)
         self.display_mode = 'scroll'
         
-        # Request new visualization with retry prompt
-        retry_message = {
-            "type": "hydra",
-            "content": json.dumps({
-                "code": "",
-                "description": "Previous visualization failed",
-                "quip": failure_quip,
-                "display": True,
-                "retry": True
-            })
-        }
-        self.mqtt.client.publish("mqtt/led-screen", json.dumps(retry_message))
+        self.update_hydra_code()
 
 def start(args, client):
     while True:
