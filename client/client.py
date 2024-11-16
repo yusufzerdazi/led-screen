@@ -159,7 +159,7 @@ class Client:
         """Update the Hydra editor with new code by reloading with code parameter"""
         try:
             # Encode code as base64 and construct URL
-            encoded_code = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+            encoded_code = base64.b64encode(code).decode('utf-8')
             self.url = f"http://localhost:5173?code={encoded_code}"
             print(self.url)
             
