@@ -3,8 +3,6 @@ import threading
 import concurrent.futures
 from pi5neo import Pi5Neo
 
-lock = threading.RLock()
-
 class Leds:
     def __init__(self, width, height, brightness = 0.1):
         self.width = width
@@ -60,10 +58,9 @@ class Leds:
 
     def update_strip(self, strip):
         """Update a single strip"""
-        with lock:
-            if strip.strip_delay > 0:
-                time.sleep(strip.strip_delay)
-            strip.update_strip()
+        if strip.strip_delay > 0:
+            time.sleep(strip.strip_delay)
+        strip.update_strip()
 
     def show(self):
         """Update all strips in parallel"""
