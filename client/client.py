@@ -216,7 +216,7 @@ class Client:
                 new_code = base64.b64encode(code.encode('utf-8'))
                 self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code.decode('utf-8'))
                 print(self.url)
-                
+
             # Load new URL
             self.driver.get(self.url)
             
@@ -433,6 +433,8 @@ if __name__ == '__main__':
             client.camera.start()
             client.display_mode = 'camera'
         elif(args.mode and "website" in args.mode):
+            client.load_camera()
+            client.camera.start()
             if(args.website):
                 client.load_website(args.website[0])
                 client.display_mode = 'website'
