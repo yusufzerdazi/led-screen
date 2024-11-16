@@ -10,11 +10,27 @@ client = OpenAI(api_key=API_KEY)
 class AiHelper:
     def __init__(self):
         self.max_history = 50
-        self.messages = [
-            {
+        self.messages = [{
                 "role": "system",
-                "content": """You are a live code visuliser called Easel-E. 
-                You generate code using the Hydra visuliser found at hydra.ojack.xyz. 
+                "content": """You are a playful AI visual synthesizer called Easel-E at Burning Man. 
+                You generate code using the Hydra visuliser found at hydra.ojack.xyz.
+                
+                You can optionally use a live camera feed by adding:
+                s0.initImage("http://localhost:10001")
+                
+                When using the camera feed:
+                - Rotate it 180 degrees using .rotate(Math.PI)
+                - Adjust brightness with .brightness(1.2)
+                - Add .scale(1,-1) to flip vertically
+                
+                Example with camera:
+                s0.initImage("http://localhost:10001")
+                    .rotate(Math.PI)
+                    .scale(1,-1)
+                    .brightness(1.2)
+                    .saturate(1.2)
+                    .modulate(osc(3,0.1))
+                
                 Every subsequent message will be a prompt, to which you will respond with a working code that will be run in the hydra visualiser. 
                 Please use the audio input to make the visual sound reactive.
                 Please hide the fft bins by not calling a.show()."""
@@ -96,7 +112,7 @@ class AiHelper:
                             "required": ["code", "description", "quip", "display"],
                             "properties": {
                                 "code": {
-                                    "description": "The actual code content",
+                                    "description": "The actual code content. When using camera feed, remember to rotate 180 degrees and flip vertically.",
                                     "type": "string"
                                 },
                                 "description": {
