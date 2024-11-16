@@ -132,6 +132,13 @@ class Client:
             # Hide UI elements
             self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+            
+            # Hide close icon
+            try:
+                close_icon = self.driver.find_element(By.ID, "close-icon")
+                close_icon.click()
+            except Exception as e:
+                print(f"Error hiding close icon: {e}")
 
     def update_hydra_code(self, code):
         """Update the Hydra editor with new code without page reload"""
@@ -167,27 +174,27 @@ class Client:
             self.leds.blackout()
         if decoded['type'] == "hydra":
             print(decoded)
-            try:
-                content = json.loads(decoded['content'])
-                if 'display' in content and content['display']:
-                    # Check cooldown before showing new visualization
-                    if not self.can_show_visualization():
-                        print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
-                        return
+            # try:
+            #     content = json.loads(decoded['content'])
+            #     if 'display' in content and content['display']:
+            #         # Check cooldown before showing new visualization
+            #         if not self.can_show_visualization():
+            #             print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
+            #             return
                     
-                    # Show quip first
-                    if 'quip' in content:
-                        self.text_scroller.start_scroll(content['quip'])
-                        self.display_mode = 'scroll'
+            #         # Show quip first
+            #         if 'quip' in content:
+            #             self.text_scroller.start_scroll(content['quip'])
+            #             self.display_mode = 'scroll'
                     
-                    # Update the Hydra code directly
-                    if 'code' in content:
-                        self.update_hydra_code(content['code'])
+            #         # Update the Hydra code directly
+            #         if 'code' in content:
+            #             self.update_hydra_code(content['code'])
                     
-                    # Update last visualization time
-                    self.last_visualization_time = time.time()
-            except Exception as e:
-                print(f"Error processing hydra message: {e}")
+            #         # Update last visualization time
+            #         self.last_visualization_time = time.time()
+            # except Exception as e:
+            #     print(f"Error processing hydra message: {e}")
 
     def update_display(self):
         """Main display update method"""
