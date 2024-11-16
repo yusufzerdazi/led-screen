@@ -77,7 +77,7 @@ class Client:
         # Add monitoring variables
         self.last_frame = None
         self.static_frame_count = 0
-        self.max_static_frames = 5  # About 5 seconds at 0.05s refresh rate
+        self.max_static_frames = 50  # About 5 seconds at 0.05s refresh rate
         self.monitoring_active = True
         
         # Initialize AI helper
@@ -121,7 +121,7 @@ class Client:
                         self.static_frame_count = 0
                 except Exception as e:
                     print(f"Error in monitor thread: {e}")
-            time.sleep(1)  # Check every 1s
+            time.sleep(0.1)  # Check every 0.1s
         
     def init(self):
         self.mqtt.connect()
@@ -308,7 +308,7 @@ class Client:
             is_black = first_pixel == (0, 0, 0)
             all_same = all(pixel == first_pixel for pixel in pixels)
             
-            return is_black or all_same
+            return is_black and all_same
         except Exception as e:
             print(f"Error checking frame: {e}")
             return False
