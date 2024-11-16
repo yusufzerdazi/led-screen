@@ -325,7 +325,6 @@ def start(args, client):
     while True:
         client.update_display()
         client.leds.show()
-        time.sleep(0.05)  # Small delay to control refresh rate
 
 if __name__ == '__main__':
     client = None
