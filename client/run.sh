@@ -10,6 +10,24 @@ cleanup() {
     exit 0
 }
 
+# Function to restart camera stream if it fails
+start_camera_stream() {
+    while true; do
+        echo "Starting camera stream..."
+        # Add -n flag to not exit on error, --timeout 0 for no timeout
+        rpicam-vid -n --timeout 0 --width 120 --height 80 --codec h264 --inline --listen -o tcp://0.0.0.0:10001 2>&1 | while read -r line; do
+            echo "Camera: $line"
+            if [[ $line == *"Connection reset by peer"* ]]; then
+                echo "Connection reset, restarting stream..."
+                pkill -P $$ rpicam-vid
+                break
+            fi
+        done
+        echo "Camera stream ended, restarting in 1 second..."
+        sleep 1
+    done
+}
+
 # Set up trap for cleanup on script termination
 trap cleanup SIGINT SIGTERM
 
@@ -32,9 +50,8 @@ cd /home/yusuf/Code/hydra && npm run dev &
 # Wait for Hydra to start up
 sleep 5
 
-# Start the camera stream using rpicam-vid
-echo "Starting camera stream..."
-rpicam-vid -t 0 --width 120 --height 80 --codec h264 --listen -o tcp://0.0.0.0:10001 -n &
+# Start the camera stream in a loop
+start_camera_stream &
 
 # Start the LED client with local Hydra URL
 echo "Starting LED client..."
