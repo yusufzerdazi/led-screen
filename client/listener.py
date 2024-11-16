@@ -35,7 +35,11 @@ class SpeechRecognizer:
         self.messages = [
             {
                 "role": "system",
-                "content": "You are a live code visuliser called Easel-E. You generate code using the Hydra visuliser found at hydra.ojack.xyz. Every subsequent message will be a prompt, to which you will respond with a working code that will be run in the hydra visualiser. Please use the audio input to make the visual sound reactive."
+                "content": """You are a live code visuliser called Easel-E. 
+                You generate code using the Hydra visuliser found at hydra.ojack.xyz. 
+                Every subsequent message will be a prompt, to which you will respond with a working code that will be run in the hydra visualiser. 
+                Please use the audio input to make the visual sound reactive.
+                Please hide the fft bins by not calling a.show()."""
             }
         ]
 
@@ -83,13 +87,6 @@ class SpeechRecognizer:
                 # Combine all accumulated speech
                 combined_speech = " ".join(self.accumulated_speech)
                 print(f"Processing accumulated speech: {combined_speech}")
-                
-                # Add retry context if needed
-                if "retry" in combined_speech.lower():
-                    self.messages.append({
-                        "role": "system",
-                        "content": "The previous visualization failed or showed a black screen. Please generate a different visualization that is more likely to work. Prefer simpler, well-tested patterns and avoid experimental features."
-                    })
                 
                 # Add current message
                 user_message = {
