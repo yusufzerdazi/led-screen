@@ -117,10 +117,6 @@ class AiHelper:
                                 "quip": {
                                     "description": "A max 5 word sassy quip from Easel-E. Make puns about decompression, digital art, or your AI personality.",
                                     "type": "string"
-                                },
-                                "display": {
-                                    "description": "Whether the prompt would make a cool visual or not. If a random word was picked up it should not display on screen.",
-                                    "type": "boolean"
                                 }
                             },
                             "additionalProperties": False

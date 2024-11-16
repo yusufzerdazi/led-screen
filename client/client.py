@@ -275,17 +275,16 @@ class Client:
         if decoded['type'] == "hydra":
             print(decoded)
             try:
-                content = json.loads(decoded['content'])
-                if 'display' in content and content['display']:                    
-                    if 'code' in content:
-                        self.update_hydra_code(content['code'])
+                content = json.loads(decoded['content'])            
+                if 'code' in content:
+                    self.update_hydra_code(content['code'])
 
-                    if 'quip' in content:
-                        self.text_scroller.start_scroll(content['quip'])
-                        self.display_mode = 'scroll'
-                    
-                    # Update last visualization time
-                    self.last_visualization_time = time.time()
+                if 'quip' in content:
+                    self.text_scroller.start_scroll(content['quip'])
+                    self.display_mode = 'scroll'
+                
+                # Update last visualization time
+                self.last_visualization_time = time.time()
             except Exception as e:
                 print(f"Error processing hydra message: {e}")
 
