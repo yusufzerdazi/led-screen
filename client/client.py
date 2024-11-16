@@ -248,7 +248,9 @@ class Client:
                 $('.CodeMirror').click();
                 
                 // Select all text and delete
-                $('.CodeMirror')[0].CodeMirror.setValue('');
+                for (var i = 0; i < $('.CodeMirror').length; i++) {{
+                    $('.CodeMirror')[i].CodeMirror.setValue('');
+                }}
                 
                 // Set new code
                 $('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
