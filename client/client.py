@@ -166,29 +166,8 @@ class Client:
             self.driver.get(new_url)
             
             # Hide UI elements again after reload
+            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
-            
-            # Click close icon using jQuery
-            try:
-                jquery_js = """
-                    if (typeof jQuery === 'undefined') {
-                        var script = document.createElement('script');
-                        script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
-                        document.head.appendChild(script);
-                        // Wait for jQuery to load
-                        return new Promise((resolve) => {
-                            script.onload = () => {
-                                jQuery('#close-icon').click();
-                                resolve();
-                            };
-                        });
-                    } else {
-                        jQuery('#close-icon').click();
-                    }
-                """
-                self.driver.execute_script(jquery_js)
-            except Exception as e:
-                print(f"Error clicking close icon: {e}")
             
         except Exception as e:
             print(f"Error updating code: {e}")
@@ -235,11 +214,7 @@ class Client:
             if frame:
                 self.pil_display(frame)
             else:
-                # Scrolling finished, switch to queued URL if exists
-                if self.queued_url:
-                    self.load_website(self.queued_url)
-                    self.queued_url = None
-                    self.display_mode = 'website'
+                self.display_mode = 'website'
         elif self.display_mode == 'website':
             self.website_display()
         elif self.display_mode == 'camera':
