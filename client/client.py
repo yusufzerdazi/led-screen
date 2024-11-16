@@ -240,6 +240,8 @@ class Client:
             if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
                 code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
             
+            print(code)
+
             # Use jQuery to update editor and run code
             js_code = f"""
                 // Click editor
