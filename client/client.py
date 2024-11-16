@@ -160,10 +160,11 @@ class Client:
         try:
             # Encode code as base64 and construct URL
             encoded_code = base64.b64encode(code.encode('utf-8')).decode('utf-8')
-            new_url = f"http://localhost:5173?code={encoded_code}"
+            self.url = f"http://localhost:5173?code={encoded_code}"
+            print(self.url)
             
             # Load new URL
-            self.driver.get(new_url)
+            self.driver.get(self.url)
             
             # Hide UI elements again after reload
             self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
@@ -193,14 +194,12 @@ class Client:
                         print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
                         return
                     
-                    # Show quip first
+                    if 'code' in content:
+                        self.update_hydra_code(content['code'])
+
                     if 'quip' in content:
                         self.text_scroller.start_scroll(content['quip'])
                         self.display_mode = 'scroll'
-                    
-                    # Update the Hydra code directly
-                    if 'code' in content:
-                        self.update_hydra_code(content['code'])
                     
                     # Update last visualization time
                     self.last_visualization_time = time.time()
