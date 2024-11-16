@@ -130,7 +130,7 @@ class Client:
             self.driver.get(self.url)
             
             # Hide UI elements
-            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
+            # self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
             
             # Inject jQuery if not present and click close icon
@@ -169,11 +169,28 @@ class Client:
                         // Click editor
                         jQuery('.CodeMirror').click();
                         
-                        // Select all text and delete
-                        jQuery('.CodeMirror')[0].CodeMirror.setValue('');
+                        // Create keyboard events for Ctrl+A
+                        const ctrlDown = new KeyboardEvent('keydown', {{
+                            key: 'a',
+                            code: 'KeyA',
+                            ctrlKey: true,
+                            bubbles: true
+                        }});
                         
-                        // Set new code
-                        jQuery('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
+                        // Send Ctrl+A
+                        document.activeElement.dispatchEvent(ctrlDown);
+                        
+                        // Type the code character by character
+                        const code = `{code}`;
+                        for (let i = 0; i < code.length; i++) {{
+                            const char = code[i];
+                            const event = new KeyboardEvent('keypress', {{
+                                key: char,
+                                char: char,
+                                bubbles: true
+                            }});
+                            document.activeElement.dispatchEvent(event);
+                        }}
                         
                         // Click run button
                         jQuery('#run-icon').click();
@@ -181,8 +198,31 @@ class Client:
                 }} else {{
                     // jQuery already loaded
                     jQuery('.CodeMirror').click();
-                    jQuery('.CodeMirror')[0].CodeMirror.setValue('');
-                    jQuery('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
+                    
+                    // Create keyboard events for Ctrl+A
+                    const ctrlDown = new KeyboardEvent('keydown', {{
+                        key: 'a',
+                        code: 'KeyA',
+                        ctrlKey: true,
+                        bubbles: true
+                    }});
+                    
+                    // Send Ctrl+A
+                    document.activeElement.dispatchEvent(ctrlDown);
+                    
+                    // Type the code character by character
+                    const code = `{code}`;
+                    for (let i = 0; i < code.length; i++) {{
+                        const char = code[i];
+                        const event = new KeyboardEvent('keypress', {{
+                            key: char,
+                            char: char,
+                            bubbles: true
+                        }});
+                        document.activeElement.dispatchEvent(event);
+                    }}
+                    
+                    // Click run button
                     jQuery('#run-icon').click();
                 }}
             """
