@@ -33,7 +33,7 @@ class SpeechRecognizer:
         # Add accumulation variables
         self.accumulated_speech = []
         self.last_translation_time = time.time()
-        self.accumulation_period = 120  # 2 minutes in seconds
+        self.accumulation_period = 10  # 2 minutes in seconds
 
         # Initialize AI helper
         self.ai_helper = AiHelper()
