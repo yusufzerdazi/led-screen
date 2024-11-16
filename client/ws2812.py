@@ -17,7 +17,7 @@ class Leds:
         ]
 
         self.strips[0].strip_delay = 0.0
-        self.strips[1].strip_delay = 0.5
+        self.strips[1].strip_delay = 0.001
         
         # Add delay between strip updates (in seconds)
         self.strip_delay = 0.0
