@@ -68,11 +68,7 @@ class Client:
         self.leds = leds
         self.text_scroller = TextScroller(self.width, self.height)
         self.display_mode = None
-        
-        # Add cooldown tracking
-        self.last_visualization_time = 0
-        self.cooldown_period = 120  # 2 minutes in seconds
-        
+                
         # Add monitoring variables
         self.last_frame = None
         self.static_frame_count = 0
@@ -102,13 +98,7 @@ class Client:
                 except Exception as e:
                     print(f"Error in monitor thread: {e}")
             time.sleep(1)  # Check every 1s
-    
-    def can_show_visualization(self):
-        """Check if enough time has passed since last visualization"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_visualization_time
-        return time_since_last >= self.cooldown_period
-    
+        
     def init(self):
         self.mqtt.connect()
         self.leds.init()
@@ -190,12 +180,7 @@ class Client:
             print(decoded)
             try:
                 content = json.loads(decoded['content'])
-                if 'display' in content and content['display']:
-                    # Check cooldown before showing new visualization
-                    if not self.can_show_visualization():
-                        print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
-                        return
-                    
+                if 'display' in content and content['display']:                    
                     if 'code' in content:
                         self.update_hydra_code(content['code'])
 
