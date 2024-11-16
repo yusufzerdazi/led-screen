@@ -4,7 +4,7 @@ import concurrent.futures
 from pi5neo import Pi5Neo
 
 class Leds:
-    def __init__(self, width, height, brightness = 0.1):
+    def __init__(self, width, height, brightness = 1):
         self.width = width
         self.height = height
         self.brightness = brightness
