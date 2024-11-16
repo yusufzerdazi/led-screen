@@ -15,15 +15,13 @@ start_camera_stream() {
     while true; do
         echo "Starting camera stream..."
         # Add -n flag to not exit on error, --timeout 0 for no timeout
-        # Add --listen-timeout to allow reconnections, and --codec-options to improve streaming
         rpicam-vid -n \
             --timeout 0 \
-            --listen-timeout 0 \
             --width 120 \
             --height 80 \
             --codec h264 \
             --inline \
-            --codec-options "repeat=1:profile=baseline" \
+            --codec-options "profile=baseline:tune=zerolatency:repeat=1" \
             --listen \
             -o tcp://0.0.0.0:10001 2>&1 | while read -r line; do
             echo "Camera: $line"
