@@ -156,77 +156,39 @@ class Client:
                 print(f"Error injecting jQuery and hiding close icon: {e}")
 
     def update_hydra_code(self, code):
-        """Update the Hydra editor with new code without page reload"""
+        """Update the Hydra editor with new code by reloading with code parameter"""
         try:
-            # Use jQuery to find and interact with elements, ensuring jQuery is loaded
-            js_code = f"""
-                if (typeof jQuery === 'undefined') {{
-                    var script = document.createElement('script');
-                    script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
-                    document.head.appendChild(script);
-                    // Wait for jQuery to load
-                    script.onload = () => {{
-                        // Click editor
-                        jQuery('.CodeMirror').click();
-                        
-                        // Create keyboard events for Ctrl+A
-                        const ctrlDown = new KeyboardEvent('keydown', {{
-                            key: 'a',
-                            code: 'KeyA',
-                            ctrlKey: true,
-                            bubbles: true
-                        }});
-                        
-                        // Send Ctrl+A
-                        document.activeElement.dispatchEvent(ctrlDown);
-                        
-                        // Type the code character by character
-                        const code = `{code}`;
-                        for (let i = 0; i < code.length; i++) {{
-                            const char = code[i];
-                            const event = new KeyboardEvent('keypress', {{
-                                key: char,
-                                char: char,
-                                bubbles: true
-                            }});
-                            document.activeElement.dispatchEvent(event);
-                        }}
-                        
-                        // Click run button
-                        jQuery('#run-icon').click();
-                    }};
-                }} else {{
-                    // jQuery already loaded
-                    jQuery('.CodeMirror').click();
-                    
-                    // Create keyboard events for Ctrl+A
-                    const ctrlDown = new KeyboardEvent('keydown', {{
-                        key: 'a',
-                        code: 'KeyA',
-                        ctrlKey: true,
-                        bubbles: true
-                    }});
-                    
-                    // Send Ctrl+A
-                    document.activeElement.dispatchEvent(ctrlDown);
-                    
-                    // Type the code character by character
-                    const code = `{code}`;
-                    for (let i = 0; i < code.length; i++) {{
-                        const char = code[i];
-                        const event = new KeyboardEvent('keypress', {{
-                            key: char,
-                            char: char,
-                            bubbles: true
-                        }});
-                        document.activeElement.dispatchEvent(event);
-                    }}
-                    
-                    // Click run button
-                    jQuery('#run-icon').click();
-                }}
-            """
-            self.driver.execute_script(js_code)
+            # Encode code as base64 and construct URL
+            encoded_code = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+            new_url = f"http://localhost:5173?code={encoded_code}"
+            
+            # Load new URL
+            self.driver.get(new_url)
+            
+            # Hide UI elements again after reload
+            self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+            
+            # Click close icon using jQuery
+            try:
+                jquery_js = """
+                    if (typeof jQuery === 'undefined') {
+                        var script = document.createElement('script');
+                        script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
+                        document.head.appendChild(script);
+                        // Wait for jQuery to load
+                        return new Promise((resolve) => {
+                            script.onload = () => {
+                                jQuery('#close-icon').click();
+                                resolve();
+                            };
+                        });
+                    } else {
+                        jQuery('#close-icon').click();
+                    }
+                """
+                self.driver.execute_script(jquery_js)
+            except Exception as e:
+                print(f"Error clicking close icon: {e}")
             
         except Exception as e:
             print(f"Error updating code: {e}")
@@ -244,27 +206,27 @@ class Client:
             self.leds.blackout()
         if decoded['type'] == "hydra":
             print(decoded)
-            # try:
-            #     content = json.loads(decoded['content'])
-            #     if 'display' in content and content['display']:
-            #         # Check cooldown before showing new visualization
-            #         if not self.can_show_visualization():
-            #             print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
-            #             return
+            try:
+                content = json.loads(decoded['content'])
+                if 'display' in content and content['display']:
+                    # Check cooldown before showing new visualization
+                    if not self.can_show_visualization():
+                        print(f"Cooldown active. Please wait {self.cooldown_period - (time.time() - self.last_visualization_time):.0f} seconds")
+                        return
                     
-            #         # Show quip first
-            #         if 'quip' in content:
-            #             self.text_scroller.start_scroll(content['quip'])
-            #             self.display_mode = 'scroll'
+                    # Show quip first
+                    if 'quip' in content:
+                        self.text_scroller.start_scroll(content['quip'])
+                        self.display_mode = 'scroll'
                     
-            #         # Update the Hydra code directly
-            #         if 'code' in content:
-            #             self.update_hydra_code(content['code'])
+                    # Update the Hydra code directly
+                    if 'code' in content:
+                        self.update_hydra_code(content['code'])
                     
-            #         # Update last visualization time
-            #         self.last_visualization_time = time.time()
-            # except Exception as e:
-            #     print(f"Error processing hydra message: {e}")
+                    # Update last visualization time
+                    self.last_visualization_time = time.time()
+            except Exception as e:
+                print(f"Error processing hydra message: {e}")
 
     def update_display(self):
         """Main display update method"""
