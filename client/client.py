@@ -213,14 +213,14 @@ class Client:
                 buffer = BytesIO()
                 
                 # Capture directly to buffer with small size
-                self.camera.capture_file(buffer, format='png')
+                self.camera.capture_file(buffer, format='jpeg')
                 buffer.seek(0)
                 
                 # Convert to base64
                 base64_image = base64.b64encode(buffer.getvalue()).decode()
                 
                 # Store with data URL prefix for PNG
-                self.camera_snapshot = "data:image/png;base64," + base64_image
+                self.camera_snapshot = "data:image/jpeg;base64," + base64_image
                 self.camera_snapshot_time = current_time
                 
         except Exception as e:
