@@ -16,7 +16,7 @@ class AiHelper:
                 You generate code using the Hydra visuliser found at hydra.ojack.xyz.
                 
                 You can optionally use a live camera feed by adding:
-                s0.initImage("http://localhost:10001")
+                s0.initImage("CAMERA_FEED_TOKEN")
                 
                 When using the camera feed:
                 - Rotate it 180 degrees using .rotate(Math.PI)
@@ -24,7 +24,7 @@ class AiHelper:
                 - Add .scale(1,-1) to flip vertically
                 
                 Example with camera:
-                s0.initImage("http://localhost:10001")
+                s0.initImage("CAMERA_FEED_TOKEN")
                     .rotate(Math.PI)
                     .scale(1,-1)
                     .brightness(1.2)
@@ -112,7 +112,7 @@ class AiHelper:
                             "required": ["code", "description", "quip", "display"],
                             "properties": {
                                 "code": {
-                                    "description": "The actual code content. When using camera feed, remember to rotate 180 degrees and flip vertically.",
+                                    "description": "The actual code content. Use CAMERA_FEED_TOKEN when you want to use the camera feed.",
                                     "type": "string"
                                 },
                                 "description": {

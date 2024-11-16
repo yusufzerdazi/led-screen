@@ -106,6 +106,11 @@ class Client:
         self.text_thread = Thread(target=self.process_text_queue)
         self.text_thread.daemon = True
         self.text_thread.start()
+        
+        # Add camera snapshot
+        self.camera_snapshot = None
+        self.camera_snapshot_time = 0
+        self.camera_snapshot_interval = 1  # Update snapshot every second
 
     def monitor_display(self):
         """Thread function to monitor display for static frames"""
@@ -135,6 +140,7 @@ class Client:
         self.camera = Picamera2()
         preview_config = self.camera.create_preview_configuration(main={"size": (120, 80)}, lores={"size": (120, 80)}, display="lores")
         self.camera.configure(preview_config)
+        self.camera.start()  # Start camera when loaded
 
     def start_camera_stream(self):
         self.camera = Picamera2()
@@ -173,13 +179,40 @@ class Client:
             self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
             self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
 
+    def update_camera_snapshot(self):
+        """Update the base64 encoded camera snapshot"""
+        try:
+            # Only update if enough time has passed
+            current_time = time.time()
+            if current_time - self.camera_snapshot_time >= self.camera_snapshot_interval:
+                # Capture to file
+                self.camera.capture_file("camera_snapshot.png", format='png')
+                
+                # Read file and convert to base64
+                with open("camera_snapshot.png", "rb") as image_file:
+                    base64_image = base64.b64encode(image_file.read()).decode()
+                
+                # Store with data URL prefix for PNG
+                self.camera_snapshot = "data:image/png;base64," + base64_image
+                self.camera_snapshot_time = current_time
+                
+        except Exception as e:
+            print(f"Error updating camera snapshot: {e}")
+
     def update_hydra_code(self, code=None):
         """Update the Hydra editor with new code by reloading with code parameter"""
         try:
-            # Encode code as base64 and construct URL
             if code is None:
                 self.url = "http://localhost:5173"
             else:
+                # Update camera snapshot
+                self.update_camera_snapshot()
+                
+                # Replace camera token with actual snapshot if present
+                if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
+                    code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
+                
+                # Encode and load
                 new_code = base64.b64encode(code.encode('utf-8'))
                 self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code.decode('utf-8'))
             
