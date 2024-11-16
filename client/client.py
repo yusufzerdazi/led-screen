@@ -220,7 +220,7 @@ class Client:
                 base64_image = base64.b64encode(buffer.getvalue()).decode()
                 
                 # Store with data URL prefix for PNG
-                self.camera_snapshot = "data:image/jpeg;base64," + base64_image
+                self.camera_snapshot = "data:image/jpeg;base64," + urllib.parse.quote_plus(base64_image)
                 self.camera_snapshot_time = current_time
                 
         except Exception as e:
@@ -238,7 +238,7 @@ class Client:
             
             # Replace camera token with actual snapshot if present
             if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
-                code = code.replace("CAMERA_FEED_TOKEN", urllib.parse.quote_plus(self.camera_snapshot))
+                code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
             
             print(code)
 
