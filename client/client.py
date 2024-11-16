@@ -365,9 +365,18 @@ class Client:
             self.handle_visualization_failure()
 
     def check_static_frame(self, frame):
-        """Check if frame is static (black or single color)"""
+        """Check if frame is static (black or single color) or has error logs"""
         try:
-            # Resize for faster processing
+            # First check for error logs
+            try:
+                error_logs = self.driver.find_elements(By.CLASS_NAME, "log-error")
+                if error_logs and any(log.is_displayed() for log in error_logs):
+                    print("Error log detected")
+                    return True
+            except Exception as e:
+                print(f"Error checking logs: {e}")
+            
+            # Then check frame
             small_frame = frame.resize((4, 3), Image.LANCZOS)
             pixels = list(small_frame.getdata())
             

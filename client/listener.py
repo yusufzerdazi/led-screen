@@ -33,7 +33,7 @@ class SpeechRecognizer:
         # Add accumulation variables
         self.accumulated_speech = []
         self.last_translation_time = time.time()
-        self.accumulation_period = 10  # 2 minutes in seconds
+        self.accumulation_period = 120  # 2 minutes in seconds
 
         # Initialize AI helper
         self.ai_helper = AiHelper()
@@ -62,10 +62,11 @@ class SpeechRecognizer:
                     language="en"
                 )
 
-            # Check word count
+            # Check word count and filter out unwanted phrases
             word_count = len(speech.split())
-            if word_count < 2:
-                print(f"Too few words detected ({word_count}), ignoring: {speech}")
+            speech_lower = speech.lower()
+            if word_count < 2 or "thanks" in speech_lower:
+                print(f"Ignored speech ({word_count} words): {speech}")
                 return speech
 
             # Add to accumulation
