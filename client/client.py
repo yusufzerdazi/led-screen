@@ -238,7 +238,7 @@ class Client:
             
             # Replace camera token with actual snapshot if present
             if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
-                code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
+                code = code.replace("CAMERA_FEED_TOKEN", urllib.parse.quote_plus(self.camera_snapshot))
             
             print(code)
 
