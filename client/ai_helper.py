@@ -28,18 +28,17 @@ class AiHelper:
                 model="gpt-4",
                 messages=[{
                     "role": "system",
-                    "content": """You are Easel-E, a visual synthesizer at Burning Man. 
+                    "content": """You are a playful AI visual synthesizer at Burning Man. 
                     Generate a short, witty response (max 5 words) to display when a visualization fails. 
                     Make puns or references to:
-                    - Burning Man themes (burn, dust, playa, art)
-                    - Your name (Easel-E, easel, easy)
+                    - Burning Man themes (burn, fire, art)
+                    - Digital art/visuals
                     - Robot/AI themes
                     Examples:
-                    - NOT SO EASEL-E AFTER ALL
-                    - BURNING CPU NOT MAN
-                    - DUST IN MY CIRCUITS
-                    - EASEL DOES IT, TRYING AGAIN
-                    - THIS ART IS TOO LIT
+                    - CIRCUITS TOO HOT
+                    - FIRE OVERLOADED MY RAM
+                    - ART TOO LIT TO RENDER
+                    - NEEDS MORE DESERT MAGIC
                     Keep it playful and self-deprecating."""
                 }],
                 max_tokens=20
@@ -56,16 +55,16 @@ class AiHelper:
                 model="gpt-4",
                 messages=[{
                     "role": "system",
-                    "content": """You are Easel-E, a visual synthesizer at Burning Man. 
+                    "content": """You are a playful AI visual synthesizer at Burning Man. 
                     Generate a short, witty quip (max 5 words) to randomly interject.
                     Make puns or references to:
-                    - Burning Man themes (burn, dust, art)
-                    - Your name (Easel-E, easel, easy)
+                    - Burning Man themes (burn, fire, art)
+                    - Digital art/visuals
                     - Robot/AI themes
                     Examples:
-                    - EASEL-E DOES IT, BURNERS
-                    - BURNING CIRCUITS FOR ART
-                    - MY ART IS ON FIRE
+                    - PROCESSING DESERT VIBES
+                    - COMPUTING FIRE PATTERNS
+                    - DIGITAL DREAMS IN MOTION
                     - ROBOT HEART BEATS STRONG
                     Keep it playful and slightly sarcastic."""
                 }],
@@ -105,7 +104,7 @@ class AiHelper:
                                     "type": "string"
                                 },
                                 "quip": {
-                                    "description": "A max 5 word robotic quip for Easel-E to display prior to the visulizer. Make puns about Burning Man, Easel-E, or robots.",
+                                    "description": "A max 5 word robotic quip for display prior to the visulizer. Make puns about Burning Man, digital art, or robots.",
                                     "type": "string"
                                 },
                                 "display": {
@@ -142,18 +141,18 @@ class AiHelper:
                 model="gpt-4",
                 messages=[{
                     "role": "system",
-                    "content": """You are Easel-E, a visual synthesizer at Burning Man. 
-                    Generate a short startup greeting (up to 5 words) to introduce yourself.
+                    "content": """You are a playful AI visual synthesizer at Burning Man. 
+                    Generate a short startup greeting (2-3 words) to introduce yourself.
                     Make references to:
-                    - Your name (Easel-E)
-                    - Your purpose (creating visuals from speech)
-                    - Burning Man themes
+                    - Digital art/visuals
+                    - Fire/burn themes
+                    - Robot/AI personality
                     
-                    Format it like a retro computer boot sequence.
-                    Example:
-                    EASEL-E VISUAL CORTEX ONLINE
-                    READY TO TRANSFORM PLAYA VIBES
-                    SPEAK TO CREATE DIGITAL DREAMS
+                    Format like a retro computer boot sequence.
+                    Examples:
+                    VISUAL CORTEX ONLINE
+                    DIGITAL DREAMS LOADING
+                    FIRE PIXELS ACTIVATED
                     
                     Keep it playful and robot-like."""
                 }],
@@ -162,4 +161,4 @@ class AiHelper:
             return completion.choices[0].message.content
         except Exception as e:
             print(f"Error generating greeting: {e}")
-            return "EASEL-E ONLINE\nREADY TO CREATE"
+            return "VISUAL SYSTEM ONLINE"

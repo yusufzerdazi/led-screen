@@ -97,6 +97,15 @@ class Client:
         self.interjection_thread = Thread(target=self.check_interjections)
         self.interjection_thread.daemon = True
         self.interjection_thread.start()
+        
+        # Add text display queue
+        self.text_queue = []
+        self.text_lock = threading.Lock()
+        
+        # Start text display thread
+        self.text_thread = Thread(target=self.process_text_queue)
+        self.text_thread.daemon = True
+        self.text_thread.start()
 
     def monitor_display(self):
         """Thread function to monitor display for static frames"""
@@ -120,8 +129,7 @@ class Client:
         
         # Show startup greeting
         greeting = self.ai_helper.generate_greeting()
-        self.text_scroller.start_scroll(greeting)
-        self.display_mode = 'scroll'
+        self.queue_text(greeting)
 
     def load_camera(self):
         self.camera = Picamera2()
@@ -313,10 +321,9 @@ class Client:
         self.static_frame_count = 0
         self.last_frame = None
         
-        # Get AI-generated failure quip
+        # Queue failure quip
         failure_quip = self.ai_helper.generate_failure_quip()
-        self.text_scroller.start_scroll(failure_quip)
-        self.display_mode = 'scroll'
+        self.queue_text(failure_quip)
         
         self.update_hydra_code()
 
@@ -327,13 +334,10 @@ class Client:
             if (current_time - self.last_interjection_time >= self.interjection_period and 
                 random.random() < self.interjection_chance):
                 
-                # Only interject if we're not already scrolling text
-                if self.display_mode != 'scroll':
-                    quip = self.ai_helper.generate_random_quip()
-                    if quip:
-                        self.text_scroller.start_scroll(quip)
-                        self.display_mode = 'scroll'
-                        self.last_interjection_time = current_time
+                quip = self.ai_helper.generate_random_quip()
+                if quip:
+                    self.queue_text(quip)
+                    self.last_interjection_time = current_time
             
             time.sleep(10)  # Check every 10 seconds
 
@@ -344,6 +348,26 @@ class Client:
             self.monitor_thread.join(timeout=1.0)
         if hasattr(self, 'interjection_thread'):
             self.interjection_thread.join(timeout=1.0)
+        if hasattr(self, 'text_thread'):
+            self.text_thread.join(timeout=1.0)
+
+    def queue_text(self, text):
+        """Add text to display queue"""
+        with self.text_lock:
+            self.text_queue.append(text)
+
+    def process_text_queue(self):
+        """Thread to process queued text displays"""
+        while self.monitoring_active:
+            if self.text_queue and self.display_mode != 'scroll':
+                with self.text_lock:
+                    text = self.text_queue.pop(0)
+                self.text_scroller.start_scroll(text)
+                self.display_mode = 'scroll'
+                # Wait for scroll to complete
+                while self.text_scroller.is_scrolling and self.monitoring_active:
+                    time.sleep(0.1)
+            time.sleep(0.1)
 
 def start(args, client):
     while True:
