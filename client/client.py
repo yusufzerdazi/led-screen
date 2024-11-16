@@ -243,23 +243,32 @@ class Client:
             print(code)
 
             # Use jQuery to update editor and run code
-            js_code = f"""
-                // Click editor
-                $('.CodeMirror').click();
+            # js_code = f"""
+            #     // Click editor
+            #     $('.CodeMirror').click();
                 
-                // Select all text and delete
-                for (var i = 0; i < $('.CodeMirror').length; i++) {{
-                    $('.CodeMirror')[i].CodeMirror.setValue('');
-                }}
+            #     // Select all text and delete
+            #     for (var i = 0; i < $('.CodeMirror').length; i++) {{
+            #         $('.CodeMirror')[i].CodeMirror.setValue('');
+            #     }}
                 
-                // Set new code
-                $('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
+            #     // Set new code
+            #     $('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
                 
-                // Click run button
-                $('#run-icon').click();
-            """
-            self.driver.execute_script(js_code)
+            #     // Click run button
+            #     $('#run-icon').click();
+            # """
+            # self.driver.execute_script(js_code)
             
+            self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(code.decode('utf-8'))
+            
+            # Load new URL
+            self.driver.get(self.url)
+            
+            # Hide UI elements again after reload
+            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
+            self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+
         except Exception as e:
             print(f"Error updating code: {e}")
 
