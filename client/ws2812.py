@@ -16,7 +16,7 @@ class Leds:
             Pi5Neo('/dev/spidev5.0', 600, 800)
         ]
 
-        self.strips[0].strip_delay = 0.001
+        self.strips[0].strip_delay = 0.01
         self.strips[1].strip_delay = 0
         
         # Add delay between strip updates (in seconds)
