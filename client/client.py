@@ -353,13 +353,12 @@ class Client:
                     self.leds.set_pixel_color(x, y, 0, 0, 0)
             
             # Create multiple patterns for music visualization
-            import time
             import math
-            t = time.time()
+            current_time = time.time()
             
             # Bass pattern - pulsing center
-            bass_intensity = int(128 + 127 * (0.5 + 0.5 * math.sin(t * 2)))
-            bass_radius = 2 + int(3 * (0.5 + 0.5 * math.sin(t * 1.5)))
+            bass_intensity = int(128 + 127 * (0.5 + 0.5 * math.sin(current_time * 2)))
+            bass_radius = 2 + int(3 * (0.5 + 0.5 * math.sin(current_time * 1.5)))
             
             for x in range(max(0, center_x - bass_radius), min(self.width, center_x + bass_radius + 1)):
                 for y in range(max(0, center_y - bass_radius), min(self.height, center_y + bass_radius + 1)):
@@ -372,8 +371,8 @@ class Client:
                         self.leds.set_pixel_color(x, y, r, g, b)
             
             # Treble pattern - outer ring
-            treble_intensity = int(100 + 100 * (0.5 + 0.5 * math.sin(t * 3)))
-            treble_radius = 6 + int(2 * (0.5 + 0.5 * math.sin(t * 2.5)))
+            treble_intensity = int(100 + 100 * (0.5 + 0.5 * math.sin(current_time * 3)))
+            treble_radius = 6 + int(2 * (0.5 + 0.5 * math.sin(current_time * 2.5)))
             
             for x in range(max(0, center_x - treble_radius), min(self.width, center_x + treble_radius + 1)):
                 for y in range(max(0, center_y - treble_radius), min(self.height, center_y + treble_radius + 1)):
@@ -386,7 +385,7 @@ class Client:
                         self.leds.set_pixel_color(x, y, r, g, b)
             
             # Add some sparkles for high frequencies
-            if int(t * 10) % 3 == 0:  # Occasional sparkles
+            if int(current_time * 10) % 3 == 0:  # Occasional sparkles
                 for _ in range(3):
                     sparkle_x = center_x + int((random.random() - 0.5) * 8)
                     sparkle_y = center_y + int((random.random() - 0.5) * 8)
