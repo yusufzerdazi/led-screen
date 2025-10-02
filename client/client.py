@@ -282,23 +282,49 @@ class Client:
       
     def website_display(self):
         try:
-            # For music visualizer, we'll use a simple approach
-            # The Hydra visualizer will handle the actual display
-            if hasattr(self, 'url') and self.url:
-                print(f"Music visualizer running at: {self.url}")
-            else:
-                # Generate initial visualization
-                if not self.current_visualization:
-                    prompt = "Create a sparse, center-focused music visualizer that reacts to audio input. Focus on pulsing patterns in the center with dark edges."
-                    response = self.ai_helper.generate_visualization(prompt)
-                    if response:
-                        try:
-                            content = json.loads(response)
-                            if 'code' in content:
-                                self.current_visualization = content['code']
-                                self.update_hydra_code(content['code'])
-                        except Exception as e:
-                            print(f"Error processing initial visualization: {e}")
+            # Generate initial visualization if we don't have one
+            if not hasattr(self, 'current_visualization') or not self.current_visualization:
+                print("Generating initial music visualization...")
+                prompt = "Create a sparse, center-focused music visualizer that reacts to audio input. Focus on pulsing patterns in the center with dark edges."
+                response = self.ai_helper.generate_visualization(prompt)
+                if response:
+                    try:
+                        content = json.loads(response)
+                        if 'code' in content:
+                            self.current_visualization = content['code']
+                            self.update_hydra_code(content['code'])
+                            print(f"Generated visualization: {content.get('description', 'Music visualizer')}")
+                    except Exception as e:
+                        print(f"Error processing initial visualization: {e}")
+            
+            # For now, just show a simple pattern until we get the Hydra integration working
+            # Create a simple pulsing center pattern
+            center_x = self.width // 2
+            center_y = self.height // 2
+            
+            # Clear all pixels
+            for x in range(self.width):
+                for y in range(self.height):
+                    self.leds.set_pixel_color(x, y, 0, 0, 0)
+            
+            # Create a pulsing center circle
+            import time
+            t = time.time()
+            intensity = int(128 + 127 * (0.5 + 0.5 * (t % 2)))
+            radius = 3 + int(2 * (0.5 + 0.5 * (t % 1.5)))
+            
+            for x in range(max(0, center_x - radius), min(self.width, center_x + radius + 1)):
+                for y in range(max(0, center_y - radius), min(self.height, center_y + radius + 1)):
+                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                    if distance <= radius:
+                        # Warm colors for music visualization
+                        r = intensity
+                        g = int(intensity * 0.3)
+                        b = int(intensity * 0.1)
+                        self.leds.set_pixel_color(x, y, r, g, b)
+            
+            # print(f"Music visualizer running - center pulsing at intensity {intensity}")
+            
         except Exception as e:
             print(f"Error in website display: {e}")
 
@@ -370,18 +396,20 @@ if __name__ == '__main__':
                             help='Use music visualizer mode')
         parser.add_argument('--simulate', type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument('--server', type=bool, action=argparse.BooleanOptionalAction, default=False)
+        parser.add_argument('--test', type=bool, action=argparse.BooleanOptionalAction, default=False)
     
         args = parser.parse_args()
         
         server = args.server
         simulate = args.simulate
+        test_mode = args.test
 
         leds = simulation.Leds(40, 30) if simulate else ws2812.Leds(40, 30, 0.1)
 
         client = Client(leds, server)
 
         if(args.mode and "music" in args.mode):
-            # Set up music visualizer
+            # Set up music visualizer in website mode
             client.display_mode = 'website'
             client.load_website("http://localhost:5173")
         elif(args.mode and "website" in args.mode):
@@ -391,7 +419,7 @@ if __name__ == '__main__':
         elif(args.mode and "dashboard" in args.mode):
             client.display_mode = 'dashboard'
         else:
-            # Default to music visualizer
+            # Default to music visualizer in website mode
             client.display_mode = 'website'
             client.load_website("http://localhost:5173")
 
