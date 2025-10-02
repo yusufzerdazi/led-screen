@@ -19,8 +19,16 @@ class AiHelper:
                 - Sound reactive using audio input (a.fft[0], a.fft[1], etc.)
                 - SPARSE - only light up the center area, keep the edges dark to avoid blinding the crowd
                 - Music-focused - respond to bass, treble, and rhythm
-                - Pulsing center patterns with black/dark backgrounds
+                - Pulsing center patterns with black/dark areas
                 - Hide the fft bins by not calling a.show()
+                
+                IMPORTANT: Do NOT use 'background' in your code as it's not available. Instead use:
+                - osc() for oscillators
+                - src() for sources
+                - colorama() for color effects
+                - modulate() for modulation
+                - blend() for blending
+                - Use solid colors or gradients instead of background
                 
                 Focus on creating pulsing center effects, radial patterns, and sparse lighting that won't overwhelm the audience.
                 Use audio reactivity to drive the intensity and patterns."""

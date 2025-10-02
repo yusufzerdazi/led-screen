@@ -112,11 +112,11 @@ class Client:
             if current_time - self.last_visualization_time >= self.visualization_interval:
                 # Generate new visualization
                 prompts = [
-                    "Create a sparse, center-focused music visualizer that reacts to audio input. Focus on pulsing patterns in the center with dark edges.",
-                    "Generate a music visualizer with radial patterns emanating from the center, using warm colors for bass and cool colors for treble.",
-                    "Create a sparse music visualizer with pulsing center circles and outer rings that respond to different frequency bands.",
-                    "Design a music visualizer with center-focused patterns that create a pulsing heart of light surrounded by darkness.",
-                    "Generate a music visualizer with concentric circles that pulse and grow from the center based on audio input."
+                    "Create a sparse, center-focused music visualizer using osc() and src() functions. Use a.fft[0] for bass and a.fft[4] for treble. Make it pulse from the center with dark edges.",
+                    "Generate a music visualizer with radial patterns using osc() and modulate(). Use warm colors for bass (a.fft[0]) and cool colors for treble (a.fft[4]). Keep it sparse and center-focused.",
+                    "Create a sparse music visualizer using osc() with different frequencies. Use a.fft[0] for center pulsing and a.fft[4] for outer effects. Avoid using background() function.",
+                    "Design a music visualizer with center-focused patterns using osc() and src(). Use a.fft[0] for intensity and a.fft[4] for color variation. Make it pulse from center.",
+                    "Generate a music visualizer with concentric circles using osc() and modulate(). Use a.fft[0] for bass pulsing and a.fft[4] for treble effects. Keep edges dark."
                 ]
                 import random
                 prompt = random.choice(prompts)
@@ -137,8 +137,29 @@ class Client:
     def load_website(self, url = None):
         if url != None:
             self.url = url
-            # For music visualizer, we'll use a simple HTTP request approach
-            print(f"Loading music visualizer at: {url}")
+            # Set up webdriver for Hydra
+            try:
+                from selenium import webdriver
+                from selenium.webdriver.chrome.service import Service
+                from selenium.webdriver.chrome.options import Options
+                
+                # Configure ChromeOptions
+                chrome_options = Options()
+                chrome_options.add_argument("--headless")  # Run in headless mode
+                chrome_options.add_argument("--no-sandbox")  # No sandbox for Pi
+                chrome_options.add_argument("--disable-gpu")
+                chrome_options.add_argument("--window-size=240,160")
+                
+                # Initialize the WebDriver instance
+                service = Service('/usr/bin/chromedriver')  # Path to Chromium's driver
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                self.driver.set_window_size(240, 160)
+                self.driver.get(self.url)
+                
+                print(f"Loaded Hydra visualizer at: {url}")
+            except Exception as e:
+                print(f"Error setting up webdriver: {e}")
+                self.driver = None
 
     def update_audio_levels(self, frequencies):
         """Update audio frequency levels for visualization"""
@@ -310,12 +331,17 @@ class Client:
             # Try to get screenshot from Hydra if available
             if hasattr(self, 'driver') and self.driver:
                 try:
+                    # Wait a moment for Hydra to render
+                    time.sleep(0.1)
                     image = self.driver.get_screenshot_as_base64()
                     frame = Image.open(BytesIO(base64.b64decode(image)))
+                    self.last_frame = frame
                     self.bytes_display(image)
+                    print("Displaying Hydra visualization")
                     return
                 except Exception as e:
                     print(f"Error getting Hydra screenshot: {e}")
+                    # If Hydra fails, continue to fallback
             
             # Fallback: Create a more interesting pattern
             center_x = self.width // 2
