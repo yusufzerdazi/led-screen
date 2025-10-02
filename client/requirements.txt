@@ -1,12 +1,7 @@
 pi5neo
 pillow
 paho-mqtt
-pyppeteer
-asyncio
 requests
 numpy==1.26.4
-selenium
-sounddevice
-SpeechRecognition
 openai
 python-dotenv

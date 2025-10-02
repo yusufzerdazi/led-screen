@@ -25,7 +25,7 @@ else
     source .venv/bin/activate
 fi
 
-sudo apt install python3-pyaudio
+# Audio dependencies removed for music visualizer
 
 # Start local Hydra instance
 echo "Starting local Hydra instance..."
@@ -34,13 +34,9 @@ cd /home/yusuf/Code/hydra && npm run dev &
 # Wait for Hydra to start up
 sleep 5
 
-# Start the LED client with local Hydra URL
-echo "Starting LED client..."
-python3 client.py --mode website --website http://localhost:5173 &
-
-# Start the speech recognition listener
-echo "Starting speech listener..."
-python3 listener.py &
+# Start the music visualizer
+echo "Starting music visualizer..."
+python3 client.py --mode music &
 
 # Wait a moment to ensure services are running
 sleep 2

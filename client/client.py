@@ -12,41 +12,20 @@ import random
 
 # from pyppeteer import launchimport socket
 
-from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
-from picamera2.outputs import FileOutput
+# Camera imports removed for music visualizer
 
 import numpy as np
 from threading import Thread
 import threading
 import time
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+# Selenium imports removed for music visualizer
 
 from text_scroller import TextScroller
 
 from ai_helper import AiHelper
 
-# Configure ChromeOptions
-chrome_options = Options()
-chrome_options.add_argument("--headless")  # Run in headless mode
-chrome_options.add_argument("--no-sandbox")  # No sandbox for Pi
-#chrome_options.add_argument("--ignore-gpu-blacklist")
-#chrome_options.add_argument("--enable-webgl")
-#chrome_options.add_argument("--use-fake-device-for-media-stream");
-#chrome_options.add_argument("--use-fake-ui-for-media-stream")
-
-chrome_options.add_experimental_option("prefs", { \
-    "profile.default_content_setting_values.media_stream_mic": 1, 
-    "profile.default_content_setting_values.media_stream_camera": 1
-})
-
-# Initialize the WebDriver instance
-service = Service('/usr/bin/chromedriver')  # Path to Chromium's driver
+# Chrome/Selenium configuration removed for music visualizer
 
 import ws2812
 import simulation
@@ -88,29 +67,19 @@ class Client:
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
         
-        # Add variables for random interjections
-        self.last_interjection_time = time.time()
-        self.interjection_period = 300  # 5 minutes between random interjections
-        self.interjection_chance = 0.2  # 20% chance when period has passed
+        # Music visualizer variables
+        self.last_visualization_time = time.time()
+        self.visualization_interval = 30  # Generate new visualization every 30 seconds
+        self.current_visualization = None
         
-        # Start interjection thread
-        self.interjection_thread = Thread(target=self.check_interjections)
-        self.interjection_thread.daemon = True
-        self.interjection_thread.start()
+        # Start visualization generation thread
+        self.visualization_thread = Thread(target=self.generate_visualizations)
+        self.visualization_thread.daemon = True
+        self.visualization_thread.start()
         
-        # Add text display queue
-        self.text_queue = []
-        self.text_lock = threading.Lock()
-        
-        # Start text display thread
-        self.text_thread = Thread(target=self.process_text_queue)
-        self.text_thread.daemon = True
-        self.text_thread.start()
-        
-        # Add camera snapshot
-        self.camera_snapshot = None
-        self.camera_snapshot_time = 0
-        self.camera_snapshot_interval = 1  # Update snapshot every second
+        # Music visualizer state
+        self.audio_levels = [0] * 8  # 8 frequency bands
+        self.last_audio_update = time.time()
 
     def monitor_display(self):
         """Thread function to monitor display for static frames"""
@@ -136,140 +105,50 @@ class Client:
         greeting = self.ai_helper.generate_greeting()
         self.queue_text(greeting)
 
-    def load_camera(self):
-        self.camera = Picamera2()
-        preview_config = self.camera.create_preview_configuration(main={"size": (120, 80)}, lores={"size": (120, 80)}, display="lores")
-        self.camera.configure(preview_config)
-        self.camera.start()  # Start camera when loaded
-
-    def start_camera_stream(self):
-        self.camera = Picamera2()
-        video_config = self.camera.create_preview_configuration(main={"size": (120, 80)}, lores={"size": (120, 80)}, display="lores")
-        self.camera.configure(video_config)
-        encoder = H264Encoder(1000000)
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind(("0.0.0.0", 10001))
-            sock.listen()
-
-            self.camera.encoders = encoder
-
-            print("1")
-            conn, addr = sock.accept()
-            print("2")
-            stream = conn.makefile("wb")
-            print("3")
-            encoder.output = FileOutput(stream)
-            print("4")
-            self.camera.start_encoder(encoder)
-            print("starting stream")
-            self.camera.start()
-            print("streaming")
+    def generate_visualizations(self):
+        """Thread to generate new visualizations periodically"""
+        while self.monitoring_active:
+            current_time = time.time()
+            if current_time - self.last_visualization_time >= self.visualization_interval:
+                # Generate new visualization
+                prompt = "Create a sparse, center-focused music visualizer that reacts to audio input. Focus on pulsing patterns in the center with dark edges."
+                response = self.ai_helper.generate_visualization(prompt)
+                if response:
+                    try:
+                        content = json.loads(response)
+                        if 'code' in content:
+                            self.current_visualization = content['code']
+                            self.update_hydra_code(content['code'])
+                            self.last_visualization_time = current_time
+                    except Exception as e:
+                        print(f"Error processing visualization: {e}")
+            time.sleep(5)  # Check every 5 seconds
     
     def load_website(self, url = None):
         if url != None:
             self.url = url
-            # Only create new browser instance for initial load
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.driver.set_window_size(240, 160)
-            self.driver.get(self.url)
-            
-            # Inject jQuery
-            jquery_js = """
-                if (typeof jQuery === 'undefined') {
-                    var script = document.createElement('script');
-                    script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
-                    document.head.appendChild(script);
-                }
-            """
-            self.driver.execute_script(jquery_js)
-            
-            # Wait for jQuery to load
-            self.driver.execute_script("""
-                return new Promise((resolve) => {
-                    function checkJQuery() {
-                        if (window.jQuery) {
-                            resolve();
-                        } else {
-                            setTimeout(checkJQuery, 100);
-                        }
-                    }
-                    checkJQuery();
-                });
-            """)
-            
-            # Hide UI elements
-            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
-            self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+            # For music visualizer, we'll use a simple HTTP request approach
+            print(f"Loading music visualizer at: {url}")
 
-    def update_camera_snapshot(self):
-        """Update the base64 encoded camera snapshot"""
-        try:
-            # Only update if enough time has passed
-            current_time = time.time()
-            if current_time - self.camera_snapshot_time >= self.camera_snapshot_interval:
-                # Create a temporary buffer for the image
-                buffer = BytesIO()
-                
-                # Capture directly to buffer with small size
-                self.camera.capture_file(buffer, format='png')
-                buffer.seek(0)
-                
-                # Convert to base64
-                base64_image = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                
-                # Store with data URL prefix for PNG
-                self.camera_snapshot = "data:image/png;base64, " + base64_image
-                self.camera_snapshot_time = current_time
-                
-        except Exception as e:
-            print(f"Error updating camera snapshot: {e}")
+    def update_audio_levels(self, frequencies):
+        """Update audio frequency levels for visualization"""
+        self.audio_levels = frequencies[:8]  # Use first 8 frequency bands
+        self.last_audio_update = time.time()
 
     def update_hydra_code(self, code=None):
         """Update the Hydra editor with new code"""
         try:
             if code is None:
                 self.url = "http://localhost:5173"
-                self.driver.get(self.url)
                 return
                 
-            # Update camera snapshot
-            #self.update_camera_snapshot()
-            
-            # Replace camera token with actual snapshot if present
-            #if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
-            #    code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
-            
-            print(code)
+            print(f"Updating Hydra code: {code}")
 
-            # Use jQuery to update editor and run code
-            # js_code = f"""
-            #     // Click editor
-            #     $('.CodeMirror').click();
-                
-            #     // Select all text and delete
-            #     for (var i = 0; i < $('.CodeMirror').length; i++) {{
-            #         $('.CodeMirror')[i].CodeMirror.setValue('');
-            #     }}
-                
-            #     // Set new code
-            #     $('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
-                
-            #     // Click run button
-            #     $('#run-icon').click();
-            # """
-            # self.driver.execute_script(js_code)
-
+            # Encode code for URL
             new_code = base64.b64encode(code.encode('utf-8'))
             self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code)
             
-            # Load new URL
-            self.driver.get(self.url)
-            
-            # Hide UI elements again after reload
-            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
-            self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+            print(f"New URL: {self.url}")
 
         except Exception as e:
             print(f"Error updating code: {e}")
@@ -279,6 +158,8 @@ class Client:
         if decoded['type'] == "frequency":
             self.display_mode = 'frequency'
             self.frequency_display(decoded)
+            # Update audio levels for visualization
+            self.update_audio_levels(decoded.get('frequencies', []))
         if decoded['type'] == "image":
             self.rgb_display(decoded)
         if decoded['type'] == "rgb":
@@ -291,10 +172,7 @@ class Client:
                 content = json.loads(decoded['content'])            
                 if 'code' in content:
                     self.update_hydra_code(content['code'])
-
-                if 'quip' in content:
-                    self.text_scroller.start_scroll(content['quip'])
-                    self.display_mode = 'scroll'
+                    self.current_visualization = content['code']
                 
                 # Update last visualization time
                 self.last_visualization_time = time.time()
@@ -303,32 +181,67 @@ class Client:
 
     def update_display(self):
         """Main display update method"""
-        if self.display_mode == 'scroll':
-            if self.text_scroller.is_scrolling:
-                frame = self.text_scroller.get_frame()
-                if frame:
-                    self.pil_display(frame)
-            else:
-                self.display_mode = 'website'
-        elif self.display_mode == 'website':
-            self.website_display()
-        elif self.display_mode == 'camera':
-            self.camera_display()
-        elif self.display_mode == 'dashboard':
-            self.dashboard_display()
-        elif self.display_mode == 'frequency':
+        if self.display_mode == 'frequency':
             # Frequency display is handled by mqtt messages
             pass
+        elif self.display_mode == 'website':
+            self.website_display()
+        elif self.display_mode == 'dashboard':
+            self.dashboard_display()
 
     def frequency_display(self, msg):
-        x = 0
-        for f in msg["frequencies"]:
-            for y in range(30):
-                if int(f * 4) > y:
-                    self.leds.set_pixel_color(x, y, 100, 255 - 6 * x, 255 - 8 * y)
-                else:  
-                    self.leds.set_pixel_color(x, y, 0, 0, 0)
-            x += 1
+        """Create sparse, center-focused music visualization"""
+        # Clear all pixels first
+        for x in range(self.width):
+            for y in range(self.height):
+                self.leds.set_pixel_color(x, y, 0, 0, 0)
+        
+        # Get frequency data
+        frequencies = msg.get("frequencies", [])
+        if not frequencies:
+            return
+            
+        # Calculate center position
+        center_x = self.width // 2
+        center_y = self.height // 2
+        
+        # Use bass frequencies (first 4) for center pulsing
+        bass_level = sum(frequencies[:4]) / 4 if len(frequencies) >= 4 else 0
+        bass_intensity = min(int(bass_level * 255), 255)
+        
+        # Use treble frequencies (last 4) for outer ring
+        treble_level = sum(frequencies[-4:]) / 4 if len(frequencies) >= 4 else 0
+        treble_intensity = min(int(treble_level * 255), 255)
+        
+        # Create pulsing center based on bass
+        if bass_intensity > 10:  # Only light up if there's significant bass
+            # Center pulsing circle
+            radius = int(bass_intensity / 50) + 1  # Scale radius based on bass
+            for x in range(max(0, center_x - radius), min(self.width, center_x + radius + 1)):
+                for y in range(max(0, center_y - radius), min(self.height, center_y + radius + 1)):
+                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                    if distance <= radius:
+                        # Create pulsing effect with bass
+                        intensity = int(bass_intensity * (1 - distance / radius))
+                        # Use warm colors for bass
+                        r = intensity
+                        g = int(intensity * 0.3)
+                        b = int(intensity * 0.1)
+                        self.leds.set_pixel_color(x, y, r, g, b)
+        
+        # Add outer ring based on treble
+        if treble_intensity > 10:  # Only light up if there's significant treble
+            outer_radius = int(treble_intensity / 30) + 3
+            for x in range(max(0, center_x - outer_radius), min(self.width, center_x + outer_radius + 1)):
+                for y in range(max(0, center_y - outer_radius), min(self.height, center_y + outer_radius + 1)):
+                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                    if 2 <= distance <= outer_radius:  # Ring, not filled
+                        # Use cool colors for treble
+                        intensity = int(treble_intensity * 0.5)
+                        r = int(intensity * 0.2)
+                        g = int(intensity * 0.8)
+                        b = intensity
+                        self.leds.set_pixel_color(x, y, r, g, b)
     
     def image_display(self, msg):
         for pix in msg["pixels"]:
@@ -349,10 +262,11 @@ class Client:
                 pix = im.getpixel((i, self.height - j - 1))
                 self.leds.set_pixel_color(i, j, pix[0], pix[1], pix[2])
     
-    def camera_display(self):
-        image = self.camera.capture_file("cam.png")
-        self.pil_display(Image.open("cam.png"))
-        #self.image_display({"pixels": [((x, y), (image[x][y][0], image[x][y][1], image[x][y][2])) for x in range(len(image)) for y in range(len(image[0]))]})
+    def music_visualizer_display(self):
+        """Display music-reactive visualization"""
+        # This will be handled by the Hydra visualizer
+        # The actual display is managed by the website_display method
+        pass
 
     def dashboard_display(self):
         sensor_response = requests.get("http://192.168.0.46/api/45F3isezBAfXK82b401E9MfiyFgAMCIs7nIGtoUV/sensors/12").json()
@@ -368,13 +282,25 @@ class Client:
       
     def website_display(self):
         try:
-            image = self.driver.get_screenshot_as_base64()
-            frame = Image.open(BytesIO(base64.b64decode(image)))
-            self.last_frame = frame
-            self.bytes_display(image)
+            # For music visualizer, we'll use a simple approach
+            # The Hydra visualizer will handle the actual display
+            if hasattr(self, 'url') and self.url:
+                print(f"Music visualizer running at: {self.url}")
+            else:
+                # Generate initial visualization
+                if not self.current_visualization:
+                    prompt = "Create a sparse, center-focused music visualizer that reacts to audio input. Focus on pulsing patterns in the center with dark edges."
+                    response = self.ai_helper.generate_visualization(prompt)
+                    if response:
+                        try:
+                            content = json.loads(response)
+                            if 'code' in content:
+                                self.current_visualization = content['code']
+                                self.update_hydra_code(content['code'])
+                        except Exception as e:
+                            print(f"Error processing initial visualization: {e}")
         except Exception as e:
             print(f"Error in website display: {e}")
-            self.handle_visualization_failure()
 
     def check_static_frame(self, frame):
         """Check if frame is static (black or single color) or has error logs"""
@@ -394,60 +320,40 @@ class Client:
             return False
 
     def handle_visualization_failure(self):
-        """Handle failed visualization by showing quip and requesting new one"""
+        """Handle failed visualization by requesting new one"""
         print("Visualization failed, requesting new one")
         
-        # Reset counters
-        self.static_frame_count = 0
-        self.last_frame = None
-        
-        # Queue failure quip
-        failure_quip = self.ai_helper.generate_failure_quip()
-        self.queue_text(failure_quip)
-        
-        self.update_hydra_code()
+        # Generate new visualization
+        prompt = "Create a sparse, center-focused music visualizer that reacts to audio input. Focus on pulsing patterns in the center with dark edges."
+        response = self.ai_helper.generate_visualization(prompt)
+        if response:
+            try:
+                content = json.loads(response)
+                if 'code' in content:
+                    self.current_visualization = content['code']
+                    self.update_hydra_code(content['code'])
+            except Exception as e:
+                print(f"Error processing new visualization: {e}")
 
     def check_interjections(self):
-        """Thread to occasionally inject random quips"""
-        while self.monitoring_active:
-            current_time = time.time()
-            if (current_time - self.last_interjection_time >= self.interjection_period and 
-                random.random() < self.interjection_chance):
-                
-                quip = self.ai_helper.generate_random_quip()
-                if quip:
-                    self.queue_text(quip)
-                    self.last_interjection_time = current_time
-            
-            time.sleep(10)  # Check every 10 seconds
+        """Thread removed for music visualizer"""
+        pass
 
     def cleanup(self):
         """Stop monitoring thread and cleanup"""
         self.monitoring_active = False
         if hasattr(self, 'monitor_thread'):
             self.monitor_thread.join(timeout=1.0)
-        if hasattr(self, 'interjection_thread'):
-            self.interjection_thread.join(timeout=1.0)
-        if hasattr(self, 'text_thread'):
-            self.text_thread.join(timeout=1.0)
+        if hasattr(self, 'visualization_thread'):
+            self.visualization_thread.join(timeout=1.0)
 
     def queue_text(self, text):
-        """Add text to display queue"""
-        with self.text_lock:
-            self.text_queue.append(text)
+        """Text functionality removed for music visualizer"""
+        pass
 
     def process_text_queue(self):
-        """Thread to process queued text displays"""
-        while self.monitoring_active:
-            if self.text_queue and self.display_mode != 'scroll':
-                with self.text_lock:
-                    text = self.text_queue.pop(0)
-                self.text_scroller.start_scroll(text)
-                self.display_mode = 'scroll'
-                # Wait for scroll to complete
-                while self.text_scroller.is_scrolling and self.monitoring_active:
-                    time.sleep(0.1)
-            time.sleep(0.1)
+        """Text functionality removed for music visualizer"""
+        pass
 
 def start(args, client):
     while True:
@@ -461,7 +367,7 @@ if __name__ == '__main__':
         parser.add_argument('--website', metavar='N', type=str, nargs='+',
                             help='Website to display')
         parser.add_argument('--mode', metavar='N', type=str, nargs='+',
-                            help='Use camera mode')
+                            help='Use music visualizer mode')
         parser.add_argument('--simulate', type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument('--server', type=bool, action=argparse.BooleanOptionalAction, default=False)
     
@@ -474,18 +380,20 @@ if __name__ == '__main__':
 
         client = Client(leds, server)
 
-        if(args.mode and "camera" in args.mode):
-            client.load_camera()
-            client.camera.start()
-            client.display_mode = 'camera'
+        if(args.mode and "music" in args.mode):
+            # Set up music visualizer
+            client.display_mode = 'website'
+            client.load_website("http://localhost:5173")
         elif(args.mode and "website" in args.mode):
-            #client.load_camera()
-            #client.camera.start()
             if(args.website):
                 client.load_website(args.website[0])
                 client.display_mode = 'website'
         elif(args.mode and "dashboard" in args.mode):
             client.display_mode = 'dashboard'
+        else:
+            # Default to music visualizer
+            client.display_mode = 'website'
+            client.load_website("http://localhost:5173")
 
         client.init()
 
@@ -497,8 +405,6 @@ if __name__ == '__main__':
         print("Exiting LED client")
     finally:
         if client:
-            if(args.mode == "camera"):
-                client.camera.stop()
             client.cleanup()  # Stop monitoring thread
             client.leds.blackout()
             client.leds.show()
