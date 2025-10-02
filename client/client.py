@@ -69,7 +69,7 @@ class Client:
         
         # Music visualizer variables
         self.last_visualization_time = time.time()
-        self.visualization_interval = 30  # Generate new visualization every 30 seconds
+        self.visualization_interval = 15  # Generate new visualization every 15 seconds
         self.current_visualization = None
         
         # Start visualization generation thread
@@ -111,7 +111,16 @@ class Client:
             current_time = time.time()
             if current_time - self.last_visualization_time >= self.visualization_interval:
                 # Generate new visualization
-                prompt = "Create a sparse, center-focused music visualizer that reacts to audio input. Focus on pulsing patterns in the center with dark edges."
+                prompts = [
+                    "Create a sparse, center-focused music visualizer that reacts to audio input. Focus on pulsing patterns in the center with dark edges.",
+                    "Generate a music visualizer with radial patterns emanating from the center, using warm colors for bass and cool colors for treble.",
+                    "Create a sparse music visualizer with pulsing center circles and outer rings that respond to different frequency bands.",
+                    "Design a music visualizer with center-focused patterns that create a pulsing heart of light surrounded by darkness.",
+                    "Generate a music visualizer with concentric circles that pulse and grow from the center based on audio input."
+                ]
+                import random
+                prompt = random.choice(prompts)
+                print(f"Generating new visualization: {prompt}")
                 response = self.ai_helper.generate_visualization(prompt)
                 if response:
                     try:
@@ -120,6 +129,7 @@ class Client:
                             self.current_visualization = content['code']
                             self.update_hydra_code(content['code'])
                             self.last_visualization_time = current_time
+                            print(f"New visualization generated: {content.get('description', 'Music visualizer')}")
                     except Exception as e:
                         print(f"Error processing visualization: {e}")
             time.sleep(5)  # Check every 5 seconds
@@ -297,8 +307,17 @@ class Client:
                     except Exception as e:
                         print(f"Error processing initial visualization: {e}")
             
-            # For now, just show a simple pattern until we get the Hydra integration working
-            # Create a simple pulsing center pattern
+            # Try to get screenshot from Hydra if available
+            if hasattr(self, 'driver') and self.driver:
+                try:
+                    image = self.driver.get_screenshot_as_base64()
+                    frame = Image.open(BytesIO(base64.b64decode(image)))
+                    self.bytes_display(image)
+                    return
+                except Exception as e:
+                    print(f"Error getting Hydra screenshot: {e}")
+            
+            # Fallback: Create a more interesting pattern
             center_x = self.width // 2
             center_y = self.height // 2
             
@@ -307,23 +326,46 @@ class Client:
                 for y in range(self.height):
                     self.leds.set_pixel_color(x, y, 0, 0, 0)
             
-            # Create a pulsing center circle
+            # Create multiple patterns for music visualization
             import time
+            import math
             t = time.time()
-            intensity = int(128 + 127 * (0.5 + 0.5 * (t % 2)))
-            radius = 3 + int(2 * (0.5 + 0.5 * (t % 1.5)))
             
-            for x in range(max(0, center_x - radius), min(self.width, center_x + radius + 1)):
-                for y in range(max(0, center_y - radius), min(self.height, center_y + radius + 1)):
+            # Bass pattern - pulsing center
+            bass_intensity = int(128 + 127 * (0.5 + 0.5 * math.sin(t * 2)))
+            bass_radius = 2 + int(3 * (0.5 + 0.5 * math.sin(t * 1.5)))
+            
+            for x in range(max(0, center_x - bass_radius), min(self.width, center_x + bass_radius + 1)):
+                for y in range(max(0, center_y - bass_radius), min(self.height, center_y + bass_radius + 1)):
                     distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
-                    if distance <= radius:
-                        # Warm colors for music visualization
+                    if distance <= bass_radius:
+                        intensity = int(bass_intensity * (1 - distance / bass_radius))
                         r = intensity
                         g = int(intensity * 0.3)
                         b = int(intensity * 0.1)
                         self.leds.set_pixel_color(x, y, r, g, b)
             
-            # print(f"Music visualizer running - center pulsing at intensity {intensity}")
+            # Treble pattern - outer ring
+            treble_intensity = int(100 + 100 * (0.5 + 0.5 * math.sin(t * 3)))
+            treble_radius = 6 + int(2 * (0.5 + 0.5 * math.sin(t * 2.5)))
+            
+            for x in range(max(0, center_x - treble_radius), min(self.width, center_x + treble_radius + 1)):
+                for y in range(max(0, center_y - treble_radius), min(self.height, center_y + treble_radius + 1)):
+                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                    if 4 <= distance <= treble_radius:  # Ring, not filled
+                        intensity = int(treble_intensity * 0.7)
+                        r = int(intensity * 0.2)
+                        g = int(intensity * 0.8)
+                        b = intensity
+                        self.leds.set_pixel_color(x, y, r, g, b)
+            
+            # Add some sparkles for high frequencies
+            if int(t * 10) % 3 == 0:  # Occasional sparkles
+                for _ in range(3):
+                    sparkle_x = center_x + int((random.random() - 0.5) * 8)
+                    sparkle_y = center_y + int((random.random() - 0.5) * 8)
+                    if 0 <= sparkle_x < self.width and 0 <= sparkle_y < self.height:
+                        self.leds.set_pixel_color(sparkle_x, sparkle_y, 255, 255, 255)
             
         except Exception as e:
             print(f"Error in website display: {e}")
