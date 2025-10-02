@@ -156,6 +156,14 @@ class Client:
                 self.driver.set_window_size(240, 160)
                 self.driver.get(self.url)
                 
+                # Hide UI elements to get clean visualization
+                try:
+                    self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
+                    self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+                    print("Hidden Hydra UI overlays")
+                except Exception as e:
+                    print(f"Could not hide overlays: {e}")
+                
                 print(f"Loaded Hydra visualizer at: {url}")
             except Exception as e:
                 print(f"Error setting up webdriver: {e}")
@@ -178,6 +186,19 @@ class Client:
             # Encode code for URL
             new_code = base64.b64encode(code.encode('utf-8'))
             self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code)
+            
+            # Reload the page with new code and hide overlays
+            if hasattr(self, 'driver') and self.driver:
+                try:
+                    self.driver.get(self.url)
+                    # Wait a moment for the page to load
+                    time.sleep(1)
+                    # Hide UI elements
+                    self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
+                    self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+                    print("Updated Hydra with new code and hidden overlays")
+                except Exception as e:
+                    print(f"Error updating Hydra page: {e}")
             
             print(f"New URL: {self.url}")
 
