@@ -30,10 +30,10 @@ class SpeechRecognizer:
         self.pool = futures.ThreadPoolExecutor(thread_name_prefix="Rec Thread")
         self.speech = []
         
-        # Add accumulation variables
+        # Add accumulation variables for music events
         self.accumulated_speech = []
         self.last_translation_time = time.time()
-        self.accumulation_period = 120  # 2 minutes in seconds
+        self.accumulation_period = 300  # 5 minutes in seconds for music events
 
         # Initialize AI helper
         self.ai_helper = AiHelper()
@@ -62,11 +62,13 @@ class SpeechRecognizer:
                     language="en"
                 )
 
-            # Check word count and filter out unwanted phrases
-            word_count = len(speech.split())
+            # Check for music-related keywords and filter
             speech_lower = speech.lower()
-            if "thanks" in speech_lower or "beadaholique" in speech_lower:
-                print(f"Ignored speech: {speech}")
+            music_keywords = ["music", "beat", "bass", "visual", "light", "pulse", "wave", "color", "dance", "party"]
+            
+            # Only process if it contains music-related keywords
+            if not any(keyword in speech_lower for keyword in music_keywords):
+                print(f"Ignored non-music speech: {speech}")
                 return speech
 
             # Add to accumulation
@@ -77,9 +79,9 @@ class SpeechRecognizer:
             if current_time - self.last_translation_time >= self.accumulation_period:
                 # Combine all accumulated speech
                 combined_speech = " ".join(self.accumulated_speech)
-                print(f"Processing accumulated speech: {combined_speech}")
+                print(f"Processing music-related speech: {combined_speech}")
                 
-                # Generate visualization using AI helper
+                # Generate music visualization using AI helper
                 response = self.ai_helper.generate_visualization(combined_speech)
                 if response:
                     messager.send_message(json.dumps({"type": "hydra", "content": response}))

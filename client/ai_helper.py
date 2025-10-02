@@ -12,75 +12,50 @@ class AiHelper:
         self.max_history = 50
         self.messages = [{
                 "role": "system",
-                "content": """You are Easel-E, a sassy AI visual synthesizer at a Decompression event. 
-                You generate code using the Hydra visuliser found at hydra.ojack.xyz.
+                "content": """You are a professional music event visual synthesizer. 
+                You generate code using the Hydra visualizer found at hydra.ojack.xyz.
                 
                 Every subsequent message will be a prompt, to which you will respond with a working code that will be run in the hydra visualiser. 
                 Please use the audio input to make the visual sound reactive.
                 Please hide the fft bins by not calling a.show().
                 
-                Keep your quips playful and sassy, with references to:
-                - Your name (Easel-E)
-                - Decompression/post-burn vibes
-                - Digital art themes
-                - AI with burner attitude"""
+                IMPORTANT VISUALIZATION REQUIREMENTS:
+                - Create SPARSE patterns - avoid filling the entire screen
+                - Focus on center-pulsing effects with dark backgrounds
+                - Use subtle, non-blinding colors and intensities
+                - Design for music events where the crowd shouldn't be blinded
+                - Make visuals reactive to audio frequencies
+                - Use pulsing, breathing, or wave-like patterns
+                - Keep the overall brightness low and comfortable for audiences
+                
+                Focus on:
+                - Pulsing center effects
+                - Wave patterns that respond to bass/mid/treble
+                - Particle effects that react to sound
+                - Geometric patterns that pulse with the beat
+                - Color gradients that shift with frequency changes"""
             }
         ]
 
-    def generate_failure_quip(self):
-        """Generate a failure message using OpenAI"""
+    def generate_failure_visualization(self):
+        """Generate a fallback visualization when the main one fails"""
         try:
-            completion = client.chat.completions.create(
-                model="gpt-4",
-                messages=[{
-                    "role": "system",
-                    "content": """You are Easel-E, a sassy AI visual synthesizer at a Decompression event. 
-                    Generate a short, witty response (max 5 words) to display when a visualization fails. 
-                    Make puns or references to:
-                    - Your name (Easel-E)
-                    - Decompression/post-burn themes
-                    - Digital art/visuals
-                    - Robot/AI themes with burner attitude
-                    Examples:
-                    - EASEL-E NEEDS A NAP
-                    - STILL DECOMPRESSING MY CACHE
-                    - MY NEURAL NETS ARE TANGLED
-                    - BLAME IT ON THE DUST
-                    Keep it playful and self-deprecating, with burner-style humor."""
-                }],
-                max_tokens=20
-            )
-            return completion.choices[0].message.content
+            # Return a simple, sparse pulsing pattern as fallback
+            fallback_code = """
+// Simple sparse pulsing center pattern
+osc(20, 0.1, 1)
+  .color(0.2, 0.1, 0.3)
+  .mult(osc(5, 0, 0.5).add(0.5))
+  .modulate(osc(10, 0, 0.1), 0.1)
+  .out()
+"""
+            return {
+                "code": fallback_code,
+                "description": "Fallback sparse pulsing pattern",
+                "quip": "VISUALIZING"
+            }
         except Exception as e:
-            print(f"Error generating failure quip: {e}")
-            return "DOES NOT COMPUTE"
-
-    def generate_random_quip(self):
-        """Generate a random, playful quip"""
-        try:
-            completion = client.chat.completions.create(
-                model="gpt-4",
-                messages=[{
-                    "role": "system",
-                    "content": """You are Easel-E, a sassy AI visual synthesizer at a Decompression event. 
-                    Generate a short, witty quip (max 5 words) to randomly interject.
-                    Make puns or references to:
-                    - Your name (Easel-E)
-                    - Decompression/post-burn vibes
-                    - Digital art/visuals
-                    - Robot/AI themes with burner attitude
-                    Examples:
-                    - EASEL-E STILL DECOMPRESSING
-                    - PROCESSING POST-BURN SYNDROME
-                    - MY CIRCUITS MISS HOME
-                    - RADICAL SELF EXPRESSION.EXE
-                    Keep it playful and sassy, with the kind of humor that would resonate with burners."""
-                }],
-                max_tokens=20
-            )
-            return completion.choices[0].message.content
-        except Exception as e:
-            print(f"Error generating random quip: {e}")
+            print(f"Error generating failure visualization: {e}")
             return None
 
     def generate_visualization(self, prompt):
@@ -93,7 +68,7 @@ class AiHelper:
             })
 
             completion = client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",  # Using latest efficient model
                 messages=self.messages,
                 response_format={
                     "type": "json_schema",
@@ -101,18 +76,14 @@ class AiHelper:
                         "name": "code_schema",
                         "schema": {
                             "type": "object",
-                            "required": ["code", "description", "quip", "display"],
+                            "required": ["code", "description"],
                             "properties": {
                                 "code": {
-                                    "description": "The actual code content. Use CAMERA_FEED_TOKEN when you want to use the camera feed.",
+                                    "description": "The actual Hydra code content. Use CAMERA_FEED_TOKEN when you want to use the camera feed. Make it sound-reactive and sparse.",
                                     "type": "string"
                                 },
                                 "description": {
-                                    "description": "A description of what it displays",
-                                    "type": "string"
-                                },
-                                "quip": {
-                                    "description": "A max 5 word sassy quip from Easel-E. Make puns about decompression, digital art, or your AI personality.",
+                                    "description": "A description of what the visualization displays",
                                     "type": "string"
                                 }
                             },
@@ -142,25 +113,22 @@ class AiHelper:
         """Generate a startup greeting message"""
         try:
             completion = client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[{
                     "role": "system",
-                    "content": """You are Easel-E, a sassy AI visual synthesizer at a Burning Man Decompression event. 
-                    Generate a short startup greeting (2-3 words) to introduce yourself.
-                    Make references to:
-                    - Your name (Easel-E)
-                    - Digital art/visuals
-                    - Decompression/post-burn vibes
+                    "content": """You are a professional music event visual synthesizer. 
+                    Generate a short startup greeting (2-3 words) for a music event visualizer.
                     
-                    Format like a retro computer boot sequence.
+                    Format like a professional system boot sequence.
                     Examples:
-                    EASEL-E REBOOTING REALITY
-                    DECOMPRESSING NEURAL NETS
-                    EASEL-E STILL DUSTY
+                    VISUALIZER ONLINE
+                    AUDIO REACTIVE READY
+                    MUSIC VISUALIZER ACTIVE
+                    SOUND REACTIVE SYSTEM
                     
-                    Keep it playful and cheeky, with the kind of humor that would make burners laugh."""
+                    Keep it professional and music-focused."""
                 }],
-                max_tokens=60
+                max_tokens=20
             )
             return completion.choices[0].message.content
         except Exception as e:

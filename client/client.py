@@ -88,24 +88,12 @@ class Client:
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
         
-        # Add variables for random interjections
-        self.last_interjection_time = time.time()
-        self.interjection_period = 300  # 5 minutes between random interjections
-        self.interjection_chance = 0.2  # 20% chance when period has passed
+        # Music event visualization settings
+        self.visualization_intensity = 0.5  # Control overall brightness
+        self.sparse_mode = True  # Enable sparse patterns for music events
         
-        # Start interjection thread
-        self.interjection_thread = Thread(target=self.check_interjections)
-        self.interjection_thread.daemon = True
-        self.interjection_thread.start()
-        
-        # Add text display queue
-        self.text_queue = []
-        self.text_lock = threading.Lock()
-        
-        # Start text display thread
-        self.text_thread = Thread(target=self.process_text_queue)
-        self.text_thread.daemon = True
-        self.text_thread.start()
+        # Music event mode - no text scrolling needed
+        self.music_mode = True
         
         # Add camera snapshot
         self.camera_snapshot = None
@@ -132,9 +120,8 @@ class Client:
         self.mqtt.connect()
         self.leds.init()
         
-        # Show startup greeting
-        greeting = self.ai_helper.generate_greeting()
-        self.queue_text(greeting)
+        # Set default mode to music visualization
+        self.display_mode = 'frequency'  # Start with frequency-based music visualization
 
     def load_camera(self):
         self.camera = Picamera2()
@@ -290,10 +277,6 @@ class Client:
                 content = json.loads(decoded['content'])            
                 if 'code' in content:
                     self.update_hydra_code(content['code'])
-
-                if 'quip' in content:
-                    self.text_scroller.start_scroll(content['quip'])
-                    self.display_mode = 'scroll'
                 
                 # Update last visualization time
                 self.last_visualization_time = time.time()
@@ -302,14 +285,7 @@ class Client:
 
     def update_display(self):
         """Main display update method"""
-        if self.display_mode == 'scroll':
-            if self.text_scroller.is_scrolling:
-                frame = self.text_scroller.get_frame()
-                if frame:
-                    self.pil_display(frame)
-            else:
-                self.display_mode = 'website'
-        elif self.display_mode == 'website':
+        if self.display_mode == 'website':
             self.website_display()
         elif self.display_mode == 'camera':
             self.camera_display()
@@ -318,16 +294,56 @@ class Client:
         elif self.display_mode == 'frequency':
             # Frequency display is handled by mqtt messages
             pass
+        elif self.display_mode == 'music':
+            # Music visualization mode - focus on sparse patterns
+            self.music_visualization_display()
 
     def frequency_display(self, msg):
-        x = 0
-        for f in msg["frequencies"]:
-            for y in range(30):
-                if int(f * 4) > y:
-                    self.leds.set_pixel_color(x, y, 100, 255 - 6 * x, 255 - 8 * y)
-                else:  
-                    self.leds.set_pixel_color(x, y, 0, 0, 0)
-            x += 1
+        """Enhanced frequency display for music events - sparse patterns"""
+        # Clear screen first
+        self.leds.blackout()
+        
+        # Get frequency data
+        frequencies = msg["frequencies"]
+        center_x = self.width // 2
+        center_y = self.height // 2
+        
+        # Create sparse pulsing center pattern
+        max_freq = max(frequencies) if frequencies else 0
+        intensity = min(max_freq * self.visualization_intensity, 1.0)
+        
+        # Pulsing center effect
+        radius = int(intensity * 8)  # Max radius of 8 pixels
+        for x in range(max(0, center_x - radius), min(self.width, center_x + radius + 1)):
+            for y in range(max(0, center_y - radius), min(self.height, center_y + radius + 1)):
+                distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                if distance <= radius:
+                    # Fade intensity based on distance from center
+                    fade = 1.0 - (distance / radius) if radius > 0 else 1.0
+                    brightness = int(intensity * fade * 100)
+                    
+                    # Color based on frequency bands
+                    if len(frequencies) > 0:
+                        freq_index = min(int((x / self.width) * len(frequencies)), len(frequencies) - 1)
+                        freq_value = frequencies[freq_index]
+                        
+                        # Color mapping: bass=red, mid=green, treble=blue
+                        if freq_index < len(frequencies) // 3:  # Bass
+                            r, g, b = brightness, 0, 0
+                        elif freq_index < 2 * len(frequencies) // 3:  # Mid
+                            r, g, b = 0, brightness, 0
+                        else:  # Treble
+                            r, g, b = 0, 0, brightness
+                    else:
+                        r, g, b = brightness, brightness // 2, brightness // 3
+                    
+                    self.leds.set_pixel_color(x, y, r, g, b)
+
+    def music_visualization_display(self):
+        """Display method for music visualization mode"""
+        # This would be called when in music mode
+        # The actual visualization is handled by the Hydra code
+        pass
     
     def image_display(self, msg):
         for pix in msg["pixels"]:
@@ -393,60 +409,57 @@ class Client:
             return False
 
     def handle_visualization_failure(self):
-        """Handle failed visualization by showing quip and requesting new one"""
-        print("Visualization failed, requesting new one")
+        """Handle failed visualization by generating new music visualization"""
+        print("Visualization failed, generating new music visualization")
         
         # Reset counters
         self.static_frame_count = 0
         self.last_frame = None
         
-        # Queue failure quip
-        failure_quip = self.ai_helper.generate_failure_quip()
-        self.queue_text(failure_quip)
-        
-        self.update_hydra_code()
+        # Generate new music visualization
+        new_visualization = self.generate_music_visualization()
+        if new_visualization:
+            try:
+                content = json.loads(new_visualization)
+                if 'code' in content:
+                    self.update_hydra_code(content['code'])
+            except Exception as e:
+                print(f"Error processing new visualization: {e}")
+                # Use fallback visualization
+                fallback = self.ai_helper.generate_failure_visualization()
+                if fallback and 'code' in fallback:
+                    self.update_hydra_code(fallback['code'])
+        else:
+            # Use fallback visualization
+            fallback = self.ai_helper.generate_failure_visualization()
+            if fallback and 'code' in fallback:
+                self.update_hydra_code(fallback['code'])
 
-    def check_interjections(self):
-        """Thread to occasionally inject random quips"""
-        while self.monitoring_active:
-            current_time = time.time()
-            if (current_time - self.last_interjection_time >= self.interjection_period and 
-                random.random() < self.interjection_chance):
-                
-                quip = self.ai_helper.generate_random_quip()
-                if quip:
-                    self.queue_text(quip)
-                    self.last_interjection_time = current_time
+    def generate_music_visualization(self):
+        """Generate a new music visualization when needed"""
+        try:
+            # Generate visualization based on current audio or random music prompt
+            music_prompts = [
+                "Create a sparse pulsing center pattern that reacts to bass frequencies",
+                "Generate a wave pattern that responds to mid-range frequencies with low brightness",
+                "Make a particle effect that pulses with the beat in the center of the screen",
+                "Create a geometric pattern that breathes with the music",
+                "Generate a color gradient that shifts with frequency changes"
+            ]
             
-            time.sleep(10)  # Check every 10 seconds
+            prompt = random.choice(music_prompts)
+            response = self.ai_helper.generate_visualization(prompt)
+            if response:
+                return response
+        except Exception as e:
+            print(f"Error generating music visualization: {e}")
+        return None
 
     def cleanup(self):
         """Stop monitoring thread and cleanup"""
         self.monitoring_active = False
         if hasattr(self, 'monitor_thread'):
             self.monitor_thread.join(timeout=1.0)
-        if hasattr(self, 'interjection_thread'):
-            self.interjection_thread.join(timeout=1.0)
-        if hasattr(self, 'text_thread'):
-            self.text_thread.join(timeout=1.0)
-
-    def queue_text(self, text):
-        """Add text to display queue"""
-        with self.text_lock:
-            self.text_queue.append(text)
-
-    def process_text_queue(self):
-        """Thread to process queued text displays"""
-        while self.monitoring_active:
-            if self.text_queue and self.display_mode != 'scroll':
-                with self.text_lock:
-                    text = self.text_queue.pop(0)
-                self.text_scroller.start_scroll(text)
-                self.display_mode = 'scroll'
-                # Wait for scroll to complete
-                while self.text_scroller.is_scrolling and self.monitoring_active:
-                    time.sleep(0.1)
-            time.sleep(0.1)
 
 def start(args, client):
     while True:

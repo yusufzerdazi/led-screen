@@ -34,9 +34,9 @@ cd /home/yusuf/Code/hydra && npm run dev &
 # Wait for Hydra to start up
 sleep 5
 
-# Start the LED client with local Hydra URL
-echo "Starting LED client..."
-python3 client.py --mode website --website http://localhost:5173?code=czAuaW5pdEltYWdlKCUyMkNBTUVSQV9GRUVEX1RPS0VOJTIyKSUwQW9zYyg2KS5tb2R1bGF0ZShzcmMoczApJTJDMSkub3V0KG8wKQ%3D%3D &
+# Start the LED client with music visualization mode
+echo "Starting LED client for music event visualization..."
+python3 client.py --mode website --website http://localhost:5173 &
 
 # Start the speech recognition listener
 echo "Starting speech listener..."
