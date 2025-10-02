@@ -231,14 +231,15 @@ class Client:
         try:
             if code is None:
                 self.url = "http://localhost:5173"
+                self.driver.get(self.url)
                 return
                 
             # Update camera snapshot
-            self.update_camera_snapshot()
+            #self.update_camera_snapshot()
             
             # Replace camera token with actual snapshot if present
-            if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
-                code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
+            #if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
+            #    code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
             
             print(code)
 
@@ -469,7 +470,7 @@ if __name__ == '__main__':
         server = args.server
         simulate = args.simulate
 
-        leds = simulation.Leds(40, 30) if simulate else ws2812.Leds(40, 30)
+        leds = simulation.Leds(40, 30) if simulate else ws2812.Leds(40, 30, 0.1)
 
         client = Client(leds, server)
 
@@ -478,8 +479,8 @@ if __name__ == '__main__':
             client.camera.start()
             client.display_mode = 'camera'
         elif(args.mode and "website" in args.mode):
-            client.load_camera()
-            client.camera.start()
+            #client.load_camera()
+            #client.camera.start()
             if(args.website):
                 client.load_website(args.website[0])
                 client.display_mode = 'website'

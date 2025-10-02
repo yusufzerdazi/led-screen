@@ -77,6 +77,10 @@ class SpeechRecognizer:
             if current_time - self.last_translation_time >= self.accumulation_period:
                 # Combine all accumulated speech
                 combined_speech = " ".join(self.accumulated_speech)
+                
+                self.accumulated_speech = []
+                self.last_translation_time = current_time
+
                 print(f"Processing accumulated speech: {combined_speech}")
                 
                 # Generate visualization using AI helper
@@ -85,8 +89,6 @@ class SpeechRecognizer:
                     messager.send_message(json.dumps({"type": "hydra", "content": response}))
 
                 # Reset accumulation
-                self.accumulated_speech = []
-                self.last_translation_time = current_time
 
         except sr.UnknownValueError:
             speech = "# Failed to recognize speech"

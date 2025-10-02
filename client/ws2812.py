@@ -10,7 +10,7 @@ class Leds:
         self.brightness = brightness
         
         self.strips = [
-            Pi5Neo('/dev/spidev0.0', 600, 800),
+            Pi5Neo('/dev/spidev1.0', 600, 800),
             Pi5Neo('/dev/spidev5.0', 600, 800)
         ]
 
