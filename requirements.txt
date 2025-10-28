@@ -1,0 +1,14 @@
+# LED Screen Music Visualizer Requirements
+
+# Core dependencies
+numpy>=1.21.0
+Pillow>=8.0.0
+pyaudio>=0.2.11
+
+# Professional audio analysis
+librosa>=0.9.0
+soundfile>=0.10.0
+
+# Optional: for better audio processing
+scipy>=1.7.0
+
