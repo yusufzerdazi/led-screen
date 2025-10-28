@@ -1,4 +1,3 @@
-pi5neo
 pillow
 paho-mqtt
 requests
@@ -6,4 +5,17 @@ numpy==1.26.4
 selenium
 openai
 python-dotenv
-librosa
+
+# Hardware-specific dependencies (not needed for simulation mode):
+# 
+# LED Hardware (Raspberry Pi only):
+# pi5neo - WS2812 LED control library (requires spidev)
+# Install on Pi: pip install pi5neo
+# 
+# Audio Hardware:
+# PyAudio - real-time audio capture
+# Install with: sudo apt install python3-pyaudio
+# Or: pip install pyaudio
+# 
+# librosa - advanced audio analysis
+# Install with: pip install librosa soundfile scipy

@@ -3,12 +3,14 @@
 # Core dependencies
 numpy>=1.21.0
 Pillow>=8.0.0
-pyaudio>=0.2.11
 
-# Professional audio analysis
-librosa>=0.9.0
-soundfile>=0.10.0
-
-# Optional: for better audio processing
-scipy>=1.7.0
+# Hardware-specific dependencies (not needed for simulation mode):
+# pyaudio>=0.2.11 - only needed for real audio capture on hardware
+# Install with: sudo apt install python3-pyaudio
+# Or: pip install pyaudio
+#
+# librosa>=0.9.0 - only needed for advanced audio analysis on hardware
+# soundfile>=0.10.0 - required by librosa
+# scipy>=1.7.0 - optional for better audio processing
+# Install all audio deps with: pip install pyaudio librosa soundfile scipy
 

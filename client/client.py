@@ -18,10 +18,24 @@ import numpy as np
 from threading import Thread
 import threading
 import time
-import pyaudio
+
+# Hardware-specific audio imports (only needed on real hardware, not in simulation)
+try:
+    import pyaudio
+    PYAUDIO_AVAILABLE = True
+except ImportError:
+    PYAUDIO_AVAILABLE = False
+    print("PyAudio not available - audio capture will be disabled in simulation mode")
+
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
+    print("librosa not available - advanced audio analysis features will be limited")
+
 import wave
 import struct
-import librosa
 import numpy as np
 
 # Selenium imports removed for music visualizer
@@ -32,7 +46,15 @@ from ai_helper import AiHelper
 
 # Chrome/Selenium configuration removed for music visualizer
 
-import ws2812
+# Hardware-specific LED imports (ws2812 requires spidev which is Pi-specific)
+try:
+    import ws2812
+    WS2812_AVAILABLE = True
+except ImportError as e:
+    WS2812_AVAILABLE = False
+    print(f"ws2812 hardware module not available: {e}")
+    print("Real LED hardware will not work, but simulation mode is available")
+
 import simulation
 import mqtt
 
@@ -49,7 +71,15 @@ class Client:
         self.width = 40
         self.height = 30
         self.server = server
-        self.mqtt = mqtt.Mqtt(self.on_message)
+        
+        # Initialize MQTT only if server mode is enabled
+        if self.server:
+            self.mqtt = mqtt.Mqtt(self.on_message)
+            print("MQTT enabled - will listen for remote messages")
+        else:
+            self.mqtt = None
+            print("MQTT disabled - running in standalone mode")
+        
         self.leds = leds
         
         # Set strip delay for synchronization (adjust as needed)
@@ -142,21 +172,27 @@ class Client:
             self.shape_sizes.append(6)
             self.shape_paths.append(0)  # Start with random movement
         
-        # Audio capture setup
-        self.audio_enabled = True
+        # Audio capture setup (only on real hardware, not in simulation)
+        self.is_simulation = isinstance(leds, simulation.Leds)
+        self.audio_enabled = PYAUDIO_AVAILABLE and not self.is_simulation
         self.audio_thread = None
         self.audio_stream = None
         self.audio_data = []
         self.audio_lock = threading.Lock()
         
-        # Initialize PyAudio
-        try:
-            self.p = pyaudio.PyAudio()
-            self.audio_enabled = True
-            print("PyAudio initialized successfully")
-        except Exception as e:
-            print(f"PyAudio initialization failed: {e}")
-            self.audio_enabled = False
+        # Initialize PyAudio (only if available and not in simulation mode)
+        if self.audio_enabled:
+            try:
+                self.p = pyaudio.PyAudio()
+                print("PyAudio initialized successfully")
+            except Exception as e:
+                print(f"PyAudio initialization failed: {e}")
+                self.audio_enabled = False
+        else:
+            if self.is_simulation:
+                print("Running in simulation mode - audio capture disabled")
+            else:
+                print("PyAudio not available - audio capture disabled")
         
         # Shape switching with smooth transitions
         self.current_shape = 0  # 0=circle, 1=square, 2=triangle, 3=rectangle, 4=stars, 5=heart, 6=spiral, 7=wave, 8=overlay
@@ -473,14 +509,20 @@ class Client:
             time.sleep(0.1)  # Check every 0.1s
         
     def init(self):
-        self.mqtt.connect()
+        # Connect to MQTT if server mode is enabled
+        if self.mqtt:
+            self.mqtt.connect()
+        
         self.leds.init()
         
         # Start audio capture
         if self.audio_enabled:
             self.start_audio_capture()
         else:
-            print("Audio capture disabled - using MQTT audio only")
+            if self.mqtt:
+                print("Audio capture disabled - using MQTT audio only")
+            else:
+                print("Audio capture disabled - no audio input available")
         
         # No AI greeting - using stock visuals
 
@@ -549,8 +591,24 @@ class Client:
                 chrome_options.add_argument("--window-size=240,160")
                 
                 # Initialize the WebDriver instance
-                service = Service('/usr/bin/chromedriver')  # Path to Chromium's driver
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                # Try to find chromedriver in common locations or use system PATH
+                import shutil
+                chromedriver_path = shutil.which('chromedriver')
+                if not chromedriver_path:
+                    # Try common locations
+                    for path in ['/usr/bin/chromedriver', '/usr/local/bin/chromedriver']:
+                        import os
+                        if os.path.exists(path):
+                            chromedriver_path = path
+                            break
+                
+                if chromedriver_path:
+                    print("Chromedriver pa")
+                    service = Service(chromedriver_path)
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                else:
+                    # Try without explicit service path (uses PATH)
+                    self.driver = webdriver.Chrome(options=chrome_options)
                 self.driver.set_window_size(240, 160)
                 self.driver.get(self.url)
                 
@@ -1729,9 +1787,20 @@ class Client:
         pass
 
 def start(args, client):
-    while True:
+    """Main update loop"""
+    def update():
         client.update_display()
         client.leds.show()
+    
+    # Check if we're using simulation mode
+    if hasattr(client.leds, 'start_event_loop'):
+        # Simulation mode - use Qt event loop
+        client.leds.start_event_loop(update)
+    else:
+        # Real hardware mode - use regular loop
+        while True:
+            update()
+            time.sleep(0.05)  # ~20 FPS
 
 if __name__ == '__main__':
     client = None
@@ -1751,12 +1820,26 @@ if __name__ == '__main__':
         simulate = args.simulate
         test_mode = args.test
 
-        leds = simulation.Leds(40, 30) if simulate else ws2812.Leds(40, 30, 0.65)
+        # Initialize LED hardware or simulation
+        if simulate:
+            leds = simulation.Leds(40, 30)
+        else:
+            if WS2812_AVAILABLE:
+                leds = ws2812.Leds(40, 30, 0.65)
+            else:
+                print("WARNING: ws2812 hardware not available, falling back to simulation mode")
+                print("To use real hardware, ensure you're on a Raspberry Pi with required dependencies")
+                simulate = True  # Update flag to reflect actual mode
+                leds = simulation.Leds(40, 30)
 
         client = Client(leds, server)
 
         if(args.mode and "music" in args.mode):
             # Set up music visualizer in website mode
+            client.display_mode = 'website'
+            client.load_website("http://localhost:5173")
+        elif(args.mode and "tush" in args.mode):
+            # Tush mode - music visualizer
             client.display_mode = 'website'
             client.load_website("http://localhost:5173")
         elif(args.mode and "website" in args.mode):
@@ -1772,9 +1855,10 @@ if __name__ == '__main__':
 
         client.init()
 
-        thread = Thread(target=start, args=(args, client))
-        thread.start()
-        thread.join()
+        # Start the main loop
+        # In simulation mode, this will block in the Qt event loop
+        # In hardware mode, this will run an infinite loop
+        start(args, client)
 
     except KeyboardInterrupt:
         print("Exiting LED client")

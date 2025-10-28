@@ -1,6 +1,7 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 from PyQt5.QtGui import QImage, QPixmap, QColor
+from PyQt5.QtCore import QTimer
 
 # LED strip configuration:
 LED_1_COUNT = 600  # Number of LED pixels.
@@ -46,6 +47,10 @@ class Leds:
         self.window.setFixedWidth(10 * self.width)
         self.window.setFixedHeight(10 * self.height)
         self.window.show()
+        
+        # Store update callback for timer
+        self.update_callback = None
+        self.timer = None
 
     def get_pixel_index(self, x, y):
         reversed = (y % 2 == 0)
@@ -63,6 +68,32 @@ class Leds:
 
     def show(self):
         self.window.update_pixmap()
+        # Process Qt events to keep window responsive
+        self.app.processEvents()
 
     def init(self):
+        # Don't block here - let the main loop call show() which processes events
+        pass
+    
+    def start_event_loop(self, update_callback):
+        """Start Qt event loop with periodic update callback"""
+        self.update_callback = update_callback
+        
+        # Create timer to call update function periodically
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._timer_update)
+        self.timer.start(50)  # Update every 50ms (20 FPS)
+        
+        # Start Qt event loop (blocks until window closes)
         self.app.exec()
+    
+    def _timer_update(self):
+        """Called by Qt timer to update display"""
+        if self.update_callback:
+            try:
+                self.update_callback()
+            except Exception as e:
+                print(f"Error in update callback: {e}")
+        
+    def set_strip_delay(self, delay):
+        pass

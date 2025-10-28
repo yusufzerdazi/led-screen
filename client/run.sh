@@ -1,6 +1,8 @@
 #!/bin/bash
 
-cd /home/yusuf/Code/led-screen/client
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Function to handle cleanup on script exit
 cleanup() {
@@ -29,14 +31,18 @@ fi
 
 # Start local Hydra instance
 echo "Starting local Hydra instance..."
-cd /home/yusuf/Code/hydra && npm run dev &
+cd "$SCRIPT_DIR/../../hydra" && npm run dev &
 
 # Wait for Hydra to start up
 sleep 5
 
+# Return to script directory
+cd "$SCRIPT_DIR"
+
 # Start the music visualizer
+# All parameters are forwarded to the Python script
 echo "Starting music visualizer..."
-python3 client.py --mode music &
+python3 client.py --mode tush "$@" &
 
 # Wait a moment to ensure services are running
 sleep 2
