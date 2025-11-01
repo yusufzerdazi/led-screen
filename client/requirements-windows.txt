@@ -1,0 +1,15 @@
+pillow
+paho-mqtt
+requests
+numpy==1.26.4
+selenium
+openai
+python-dotenv
+opencv-python
+face-recognition
+mediapipe
+librosa
+soundfile
+scipy
+pyaudio
+

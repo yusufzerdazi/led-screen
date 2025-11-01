@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 from PyQt5.QtGui import QImage, QPixmap, QColor
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, Qt
 
 # LED strip configuration:
 LED_1_COUNT = 600  # Number of LED pixels.
@@ -12,14 +12,30 @@ class ImageWidget(QWidget):
     def __init__(self, width, height):
         super().__init__()
 
+        # Store original dimensions
+        self.original_width = width
+        self.original_height = height
+        self.aspect_ratio = width / height
+        
         # Create a QImage and QLabel
         self.image = QImage(width, height, QImage.Format_RGB32)
         self.pixmap_label = QLabel(self)
+        self.pixmap_label.setAlignment(Qt.AlignCenter)
+        self.pixmap_label.setScaledContents(False)
 
         # Set layout
         layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.pixmap_label)
         self.setLayout(layout)
+        
+        # Enable window resize
+        self.setWindowTitle("LED Screen Simulation")
+        
+    def resizeEvent(self, event):
+        """Maintain aspect ratio when window is resized"""
+        super().resizeEvent(event)
+        self.update_pixmap()
 
     def set_pixel_color(self, x, y, r, g, b):
         """Set the color of the pixel at (x, y) to the specified RGB values."""
@@ -31,9 +47,20 @@ class ImageWidget(QWidget):
                     self.image.setPixel(i, j, color.rgb())
 
     def update_pixmap(self):
-        """Update the pixmap with the current image state."""
+        """Update the pixmap with the current image state, scaled to fit window while maintaining aspect ratio."""
         pixmap = QPixmap.fromImage(self.image)
-        self.pixmap_label.setPixmap(pixmap)
+        
+        # Get available size
+        available_size = self.size()
+        
+        # Calculate size that maintains aspect ratio
+        scaled_pixmap = pixmap.scaled(
+            available_size,
+            Qt.KeepAspectRatio,
+            Qt.FastTransformation  # Use FastTransformation for better performance
+        )
+        
+        self.pixmap_label.setPixmap(scaled_pixmap)
 
 
 class Leds:
@@ -44,13 +71,46 @@ class Leds:
 
         self.app = QApplication(sys.argv)
         self.window = ImageWidget(10 * self.width, 10 * self.height)
-        self.window.setFixedWidth(10 * self.width)
-        self.window.setFixedHeight(10 * self.height)
+        
+        # Set initial size but allow resizing
+        self.window.resize(10 * self.width, 10 * self.height)
+        
+        # Add keyboard shortcut for fullscreen (F11 or F)
+        from PyQt5.QtWidgets import QShortcut
+        from PyQt5.QtGui import QKeySequence
+        
+        self.fullscreen_shortcut = QShortcut(QKeySequence(Qt.Key_F11), self.window)
+        self.fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+        
+        self.fullscreen_shortcut2 = QShortcut(QKeySequence(Qt.Key_F), self.window)
+        self.fullscreen_shortcut2.activated.connect(self.toggle_fullscreen)
+        
+        # ESC key to exit fullscreen
+        self.escape_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self.window)
+        self.escape_shortcut.activated.connect(self.exit_fullscreen)
+        
         self.window.show()
+        
+        print("LED Screen Simulation:")
+        print("  - Press F11 or F to toggle fullscreen")
+        print("  - Window can be resized (aspect ratio maintained)")
+        print("  - Press ESC to exit fullscreen")
         
         # Store update callback for timer
         self.update_callback = None
         self.timer = None
+    
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode"""
+        if self.window.isFullScreen():
+            self.window.showNormal()
+        else:
+            self.window.showFullScreen()
+    
+    def exit_fullscreen(self):
+        """Exit fullscreen mode"""
+        if self.window.isFullScreen():
+            self.window.showNormal()
 
     def get_pixel_index(self, x, y):
         reversed = (y % 2 == 0)

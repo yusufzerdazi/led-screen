@@ -27,22 +27,35 @@ else
     source .venv/bin/activate
 fi
 
-# Audio dependencies removed for music visualizer
+# Parse mode from arguments (default to tush for backward compatibility)
+MODE="tush"
+for arg in "$@"; do
+    if [[ "$arg" == "--mode" ]]; then
+        MODE_FLAG=true
+    elif [[ "$MODE_FLAG" == true ]]; then
+        MODE="$arg"
+        MODE_FLAG=false
+        break
+    fi
+done
 
-# Start local Hydra instance
-echo "Starting local Hydra instance..."
-cd "$SCRIPT_DIR/../../hydra" && npm run dev &
-
-# Wait for Hydra to start up
-sleep 5
-
-# Return to script directory
-cd "$SCRIPT_DIR"
-
-# Start the music visualizer
-# All parameters are forwarded to the Python script
-echo "Starting music visualizer..."
-python3 client.py --mode tush "$@" &
+# Start Hydra only for tush/music mode
+if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]]; then
+    echo "Starting local Hydra instance for $MODE mode..."
+    cd "$SCRIPT_DIR/../../hydra" && npm run dev &
+    
+    # Wait for Hydra to start up
+    sleep 5
+    
+    # Return to script directory
+    cd "$SCRIPT_DIR"
+    
+    echo "Starting $MODE mode..."
+    python3 client.py "$@" &
+else
+    echo "Starting $MODE mode (Hydra not needed)..."
+    python3 client.py "$@" &
+fi
 
 # Wait a moment to ensure services are running
 sleep 2

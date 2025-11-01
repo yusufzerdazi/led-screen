@@ -5,6 +5,7 @@ numpy==1.26.4
 selenium
 openai
 python-dotenv
+opencv-python
 
 # Hardware-specific dependencies (not needed for simulation mode):
 # 
@@ -19,3 +20,15 @@ python-dotenv
 # 
 # librosa - advanced audio analysis
 # Install with: pip install librosa soundfile scipy
+# 
+# Camera and Face Recognition (for decompression mode):
+# opencv-python - camera capture and basic face detection
+# Install with: pip install opencv-python
+# 
+# face-recognition - advanced facial recognition (optional)
+# Note: Requires dlib which may need compilation on some systems
+# Install with: pip install face-recognition
+# On Raspberry Pi: sudo apt install libopenblas-dev liblapack-dev && pip install face-recognition
+#
+# mediapipe - real-time hand and body tracking for gesture-driven visuals (optional)
+# Install with: pip install mediapipe
