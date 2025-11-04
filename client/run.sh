@@ -4,6 +4,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Kill any zombie processes that cause timing jitter
+pkill chromedriver 2>/dev/null
+
 # Function to handle cleanup on script exit
 cleanup() {
     echo "Shutting down services..."

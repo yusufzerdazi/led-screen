@@ -4,7 +4,7 @@ import concurrent.futures
 from pi5neo import Pi5Neo
 
 class Leds:
-    def __init__(self, width, height, brightness = 1):
+    def __init__(self, width, height, brightness = 0.8):
         self.width = width
         self.height = height
         self.brightness = brightness
@@ -14,11 +14,11 @@ class Leds:
             Pi5Neo('/dev/spidev5.0', 600, 800)
         ]
 
-        self.strips[0].strip_delay = 0.0009
+        self.strips[0].strip_delay = 0
         self.strips[1].strip_delay = 0
         
         # Add delay between strip updates (in seconds)
-        self.strip_delay = 0.0
+        self.strip_delay = 0
         
         # Create thread pool for parallel updates
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -69,8 +69,8 @@ class Leds:
             self.pool.submit(self.update_strip, strip)
             for strip in self.strips
         ]
-        # Wait for both updates to complete
         concurrent.futures.wait(futures)
+        
 
     def init(self):
         self.blackout()

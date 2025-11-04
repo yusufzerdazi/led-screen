@@ -18,6 +18,8 @@ class BaseMode:
         """
         self.width = width
         self.height = height
+        self.frame_interval = None
+        self.last_frame_time = 0.0
     
     def setup(self, **kwargs):
         """
@@ -30,6 +32,10 @@ class BaseMode:
             **kwargs: Mode-specific configuration parameters
         """
         pass
+    
+    def set_frame_interval(self, interval):
+        """Set desired frame interval for the mode"""
+        self.frame_interval = interval
     
     def init(self):
         """

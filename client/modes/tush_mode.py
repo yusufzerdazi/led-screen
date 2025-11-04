@@ -38,7 +38,10 @@ class TushMode(WebsiteMode):
     
     def __init__(self, width=40, height=30):
         super().__init__(width, height)
-        self.hydra_url = "http://localhost:5175"
+        self.hydra_url = "http://localhost:5173"
+        
+        # FPS limiting for frame capture (configured by client)
+        self.last_frame_time = 0
         
         # Threading
         self.monitoring_thread = None
@@ -195,19 +198,23 @@ class TushMode(WebsiteMode):
     
     def update(self):
         """Generate and return the next frame with shape masking"""
+        # FPS limiting - don't process frames too frequently
+        current_time = time.time()
+        if self.frame_interval:
+            if current_time - self.last_frame_time < self.frame_interval:
+                return None  # Skip this frame to maintain target FPS
+        self.last_frame_time = current_time
+        
         # Get the frame from WebsiteMode
         frame = super().get_frame()
         
         if frame:
-            # Resize to LED dimensions BEFORE applying shape mask
+            # Resize to LED dimensions
             frame = frame.resize((self.width, self.height), Image.LANCZOS)
             
-            # Check for sparse visual and apply shape mask if needed
-            analysis = self.analyze_screenshot(frame)
-            print(analysis)
-            #if analysis and not analysis['is_sparse']:
-                # Apply shape mask if visual is not sparse
-            frame = self.apply_shape_mask(frame)
+            # DISABLED: Shape masking is too expensive and blocks LED updates causing glitches
+            # TODO: Move shape masking to background thread if needed
+            # frame = self.apply_shape_mask(frame)
         
         return frame
     
@@ -352,12 +359,10 @@ class TushMode(WebsiteMode):
         # Update shape animation
         self.update_shape_animation()
         
-        # Create a copy to work with
-        result = im.copy()
-        pixels = result.load()
-        
-        # Get actual image dimensions
-        img_width, img_height = result.size
+        # Convert to numpy array for faster processing
+        img_array = np.array(im)
+        # numpy array from PIL has shape (height, width, channels)
+        img_height, img_width, img_channels = img_array.shape
         
         # Apply fade effects
         fade_multiplier = 1.0
@@ -370,24 +375,40 @@ class TushMode(WebsiteMode):
             fade_progress = (current_time - self.fade_in_start_time) / self.fade_duration
             fade_multiplier = min(1.0, fade_progress)
         
-        # Apply shape masks with BPM-synced effects
-        for x in range(img_width):
+        # Create mask array (faster than pixel-by-pixel)
+        # Match image array dimensions: (height, width)
+        mask = np.zeros((img_height, img_width), dtype=np.float32)
+        brightness_mask = np.ones((img_height, img_width), dtype=np.float32)
+        
+        # Pre-calculate brightness multipliers for each shape
+        brightness_mults = []
+        for i in range(self.num_shapes):
+            pulse_intensity = (math.sin(self.pulse_phase + i * 0.5) + 1) / 2
+            if self.bpm_effect_type == 1:  # Opacity effect
+                brightness_mult = 0.7 + pulse_intensity * 0.3
+            else:
+                brightness_mult = 0.8 + pulse_intensity * 0.2
+            
+            if self.strobe_mode:
+                strobe_intensity = (math.sin(self.strobe_phase + i * 0.3) + 1) / 2
+                strobe_mult = 0.1 + strobe_intensity * 0.9
+                brightness_mult *= strobe_mult
+            
+            brightness_mults.append(brightness_mult)
+        
+        # Build mask by checking each shape
+        for i in range(self.num_shapes):
+            pos = self.shape_positions[i].copy()
+            size = self.shape_sizes[i]
+            
+            # Apply BPM movement offset if in movement mode
+            if self.bpm_effect_type == 2:
+                pos[0] = min(max(0, pos[0] + self.shape_movement_offset), img_width - 1)
+                pos[1] = min(max(0, pos[1] + self.shape_movement_offset), img_height - 1)
+            
+            # Calculate shape strength for all pixels at once
             for y in range(img_height):
-                max_strength = 0.0
-                combined_brightness = 1.0
-                
-                # Check each shape
-                for i in range(self.num_shapes):
-                    pos = self.shape_positions[i]
-                    size = self.shape_sizes[i]
-                    
-                    # Apply BPM movement offset if in movement mode
-                    if self.bpm_effect_type == 2:
-                        pos = [
-                            min(max(0, pos[0] + self.shape_movement_offset), img_width - 1),
-                            min(max(0, pos[1] + self.shape_movement_offset), img_height - 1)
-                        ]
-                    
+                for x in range(img_width):
                     # Get shape strength with smooth transition
                     if self.current_shape != self.target_shape:
                         current_strength = self.get_shape_strength(x, y, self.current_shape, pos, size)
@@ -398,37 +419,22 @@ class TushMode(WebsiteMode):
                         shape_strength = self.get_shape_strength(x, y, self.current_shape, pos, size)
                     
                     if shape_strength > 0:
-                        # BPM-synced brightness pulsing
-                        pulse_intensity = (math.sin(self.pulse_phase + i * 0.5) + 1) / 2
-                        
-                        # Apply BPM effect type
-                        if self.bpm_effect_type == 1:  # Opacity effect
-                            brightness_mult = 0.7 + pulse_intensity * 0.3
-                        else:
-                            brightness_mult = 0.8 + pulse_intensity * 0.2
-                        
-                        # Apply strobe effect if enabled
-                        if self.strobe_mode:
-                            strobe_intensity = (math.sin(self.strobe_phase + i * 0.3) + 1) / 2
-                            strobe_mult = 0.1 + strobe_intensity * 0.9
-                            brightness_mult *= strobe_mult
-                        
-                        max_strength = max(max_strength, shape_strength)
-                        combined_brightness *= brightness_mult
-                
-                # Apply combined effect
-                original_pixel = pixels[x, y]
-                
-                if max_strength > 0:
-                    # Inside shape - apply brightness
-                    final_strength = max_strength * combined_brightness * fade_multiplier
-                    r = int(original_pixel[0] * final_strength)
-                    g = int(original_pixel[1] * final_strength)
-                    b = int(original_pixel[2] * final_strength)
-                    pixels[x, y] = (r, g, b)
-                else:
-                    # Outside shapes - black
-                    pixels[x, y] = (0, 0, 0)
+                        # Update mask (take max strength)
+                        if shape_strength > mask[y, x]:
+                            mask[y, x] = shape_strength
+                            brightness_mask[y, x] = brightness_mults[i]
+        
+        # Apply mask to image using vectorized operations
+        mask_3d = np.stack([mask, mask, mask], axis=2)
+        brightness_3d = np.stack([brightness_mask, brightness_mask, brightness_mask], axis=2)
+        
+        # Apply combined effect: inside shapes get brightness, outside get black
+        result_array = img_array.astype(np.float32)
+        result_array = result_array * mask_3d * brightness_3d * fade_multiplier
+        result_array = np.clip(result_array, 0, 255).astype(np.uint8)
+        
+        # Convert back to PIL Image
+        result = Image.fromarray(result_array)
         
         return result
     

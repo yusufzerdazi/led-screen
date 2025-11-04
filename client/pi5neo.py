@@ -17,7 +17,7 @@ class Pi5Neo:
         self.spi = spidev.SpiDev()  # Create SPI device instance
         self.raw_data = [0] * (self.num_leds * 24)  # Placeholder for raw data sent via SPI
         self.led_state = [LEDColor()] * self.num_leds  # Initial state for each LED (off)
-
+        
         # Open the SPI device
         if self.open_spi_device(spi_device):
             time.sleep(0.1)  # Short delay to ensure device is ready

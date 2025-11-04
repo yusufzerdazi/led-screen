@@ -58,6 +58,8 @@ except ImportError as e:
 import simulation
 import mqtt
 
+DEFAULT_TARGET_FPS = 24.0
+
 lock = threading.RLock()
 
 def change_contrast(img, level):
@@ -81,6 +83,8 @@ class Client:
             print("MQTT disabled - running in standalone mode")
         
         self.leds = leds
+        self.target_fps = DEFAULT_TARGET_FPS
+        self.frame_interval = 1.0 / self.target_fps
         
         # Current display mode
         self.current_mode = None
@@ -154,12 +158,10 @@ class Client:
                 chrome_options.add_argument("--ignore-gpu-blocklist")
                 chrome_options.add_argument("--window-size=240,160")
                 
-                # Initialize the WebDriver instance
-                # Try to find chromedriver in common locations or use system PATH
+                # Fallback if webdriver-manager is not installed
                 import shutil
                 chromedriver_path = shutil.which('chromedriver')
                 if not chromedriver_path:
-                    # Try common locations
                     for path in ['/usr/bin/chromedriver', '/usr/local/bin/chromedriver']:
                         import os
                         if os.path.exists(path):
@@ -167,7 +169,6 @@ class Client:
                             break
                 
                 if chromedriver_path:
-                    print("Chromedriver pa")
                     service = Service(chromedriver_path)
                     self.driver = webdriver.Chrome(service=service, options=chrome_options)
                 else:
@@ -445,12 +446,12 @@ def start(args, client):
     # Check if we're using simulation mode
     if hasattr(client.leds, 'start_event_loop'):
         # Simulation mode - use Qt event loop
-        client.leds.start_event_loop(update)
+        client.leds.start_event_loop(update, client.frame_interval)
     else:
-        # Real hardware mode - use regular loop
+        # Real hardware mode - run as fast as possible (no FPS limiting)
+        # LED timing is critical and adding delays causes glitches
         while True:
             update()
-            time.sleep(0.05)  # ~20 FPS
 
 if __name__ == '__main__':
     client = None
@@ -475,7 +476,8 @@ if __name__ == '__main__':
             leds = simulation.Leds(40, 30)
         else:
             if WS2812_AVAILABLE:
-                leds = ws2812.Leds(40, 30, 0.65)
+                print("HAAAAAAAI")
+                leds = ws2812.Leds(40, 30, 0.10)  # 10% brightness (matching main branch)
             else:
                 print("WARNING: ws2812 hardware not available, falling back to simulation mode")
                 print("To use real hardware, ensure you're on a Raspberry Pi with required dependencies")

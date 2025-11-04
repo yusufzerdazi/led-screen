@@ -6,6 +6,8 @@ selenium
 openai
 python-dotenv
 opencv-python
+pyaudio
+librosa
 
 # Hardware-specific dependencies (not needed for simulation mode):
 # 

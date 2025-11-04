@@ -135,14 +135,15 @@ class Leds:
         # Don't block here - let the main loop call show() which processes events
         pass
     
-    def start_event_loop(self, update_callback):
+    def start_event_loop(self, update_callback, frame_interval=0.1):
         """Start Qt event loop with periodic update callback"""
         self.update_callback = update_callback
         
         # Create timer to call update function periodically
         self.timer = QTimer()
         self.timer.timeout.connect(self._timer_update)
-        self.timer.start(50)  # Update every 50ms (20 FPS)
+        interval_ms = max(int(frame_interval * 1000), 1)
+        self.timer.start(interval_ms)
         
         # Start Qt event loop (blocks until window closes)
         self.app.exec()

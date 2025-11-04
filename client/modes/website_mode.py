@@ -18,6 +18,10 @@ class WebsiteMode(BaseMode):
         self.screenshot_interval = 0.04  # ~25 FPS max capture
         self.last_screenshot_time = 0
         self._display_announced = False
+        
+        # Frame caching to prevent blocking LED updates
+        self._cached_frame = None
+        self._frame_lock = None
     
     def setup(self, **kwargs):
         """Set up with URL"""
@@ -29,7 +33,18 @@ class WebsiteMode(BaseMode):
         if not self.url:
             print("Warning: No URL provided for WebsiteMode")
             return
+        
+        # Initialize frame lock
+        from threading import Lock, Thread
+        self._frame_lock = Lock()
+        
         self.load_website(self.url)
+        
+        # Start background screenshot thread
+        self._screenshot_active = True
+        self._screenshot_thread = Thread(target=self._screenshot_loop)
+        self._screenshot_thread.daemon = True
+        self._screenshot_thread.start()
     
     def load_website(self, url):
         """Load a website using Selenium"""
@@ -49,7 +64,26 @@ class WebsiteMode(BaseMode):
             chrome_options.add_argument("--ignore-gpu-blocklist")
             chrome_options.add_argument("--window-size=240,160")
             
-            self.driver = webdriver.Chrome(options=chrome_options)
+            # Use webdriver-manager to automatically handle chromedriver
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                print("ChromeDriver loaded via webdriver-manager")
+            except ImportError:
+                # Fallback if webdriver-manager is not installed
+                chromedriver_path = shutil.which('chromedriver')
+                if not chromedriver_path:
+                    for path in ['/usr/bin/chromedriver', '/usr/local/bin/chromedriver']:
+                        if os.path.exists(path):
+                            chromedriver_path = path
+                            break
+                
+                if chromedriver_path:
+                    service = Service(chromedriver_path)
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                else:
+                    self.driver = webdriver.Chrome(options=chrome_options)
             print(f"ChromeDriver loaded, attempting to load path: {url}")
             
             self.driver.set_window_size(240, 160)
@@ -60,22 +94,36 @@ class WebsiteMode(BaseMode):
             print(f"Error loading website: {e}")
             self.driver = None
     
+    def _screenshot_loop(self):
+        """Background thread for capturing screenshots"""
+        import time
+        from PIL import Image
+        from io import BytesIO
+        import base64
+        
+        while self._screenshot_active and self.driver:
+            try:
+                # Capture screenshot (blocking operation)
+                image_data = self.driver.get_screenshot_as_base64()
+                frame = Image.open(BytesIO(base64.b64decode(image_data)))
+                
+                # Update cached frame
+                with self._frame_lock:
+                    self._cached_frame = frame
+                    
+            except Exception as e:
+                print(f"Error capturing screenshot: {e}")
+            
+            # Rate limit screenshot capture
+            time.sleep(self.screenshot_interval)
+    
     def get_frame(self):
-        """Get current frame from the browser"""
-        if not self.driver:
+        """Get current frame from cache (non-blocking)"""
+        if not self._frame_lock:
             return None
         
-        try:
-            from PIL import Image
-            from io import BytesIO
-            import base64
-            
-            image_data = self.driver.get_screenshot_as_base64()
-            frame = Image.open(BytesIO(base64.b64decode(image_data)))
-            return frame
-        except Exception as e:
-            print(f"Error getting frame: {e}")
-            return None
+        with self._frame_lock:
+            return self._cached_frame
     
     def analyze_screenshot(self, frame):
         """Analyze screenshot to provide feedback (useful for subclasses)"""
@@ -134,6 +182,11 @@ class WebsiteMode(BaseMode):
     
     def cleanup(self):
         """Close the browser"""
+        # Stop screenshot thread
+        self._screenshot_active = False
+        if hasattr(self, '_screenshot_thread'):
+            self._screenshot_thread.join(timeout=1.0)
+        
         if self.driver:
             try:
                 self.driver.quit()
