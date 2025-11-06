@@ -15,7 +15,7 @@ class WebsiteMode(BaseMode):
         super().__init__(width, height)
         self.url = None
         self.driver = None
-        self.screenshot_interval = 0.04  # ~25 FPS max capture
+        self.screenshot_interval = 0.016  # ~60 FPS max capture (increased from 25 FPS)
         self.last_screenshot_time = 0
         self._display_announced = False
         

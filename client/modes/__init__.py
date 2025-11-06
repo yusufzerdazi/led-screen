@@ -9,6 +9,7 @@ from .website_mode import WebsiteMode
 from .tush_mode import TushMode
 from .dashboard_mode import DashboardMode
 from .decompression_mode import DecompressionMode
+from .hydra_mask_mode import HydraMaskMode
 
 # Mode registry - maps mode names to mode classes
 MODE_REGISTRY = {
@@ -17,6 +18,8 @@ MODE_REGISTRY = {
     'music': TushMode,  # Alias for tush
     'dashboard': DashboardMode,
     'decompression': DecompressionMode,
+    'hydra_mask': HydraMaskMode,
+    'mask': HydraMaskMode,  # Alias
 }
 
 def get_mode(mode_name, width=256, height=144):

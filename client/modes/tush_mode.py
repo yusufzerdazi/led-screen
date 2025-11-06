@@ -212,9 +212,8 @@ class TushMode(WebsiteMode):
             # Resize to LED dimensions
             frame = frame.resize((self.width, self.height), Image.LANCZOS)
             
-            # DISABLED: Shape masking is too expensive and blocks LED updates causing glitches
-            # TODO: Move shape masking to background thread if needed
-            # frame = self.apply_shape_mask(frame)
+            # Apply shape masking with audio-reactive animations
+            frame = self.apply_shape_mask(frame)
         
         return frame
     

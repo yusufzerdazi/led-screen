@@ -1,0 +1,37 @@
+flow = osc(12, 0.02, 0.12)
+  .modulate(noise(2.6, 0.07).scrollX(0.0, 0.01), 0.35)
+  .rotate(0, 0.02)
+  .luma(0.5, 0.23)
+  .modulateRotate(noise(1.1, 0.08), 0.22)
+  .color(0.08, 0.11, 0.13)
+  .saturate(0.25)
+  .mult(solid(0.35, 0.35, 0.35, 1))
+
+// branching vein lattice
+veins = voronoi(10, 0.018, 0.9)
+  .invert()
+  .modulate(noise(1.8, 0.09), 0.18)
+  .luma(0.45, 0.18)
+  .color(0.12, 0.11, 0.09)
+  .saturate(0.2)
+  .mult(solid(0.25, 0.25, 0.25, 1))
+
+// faint neural nodes / glints
+nodes = noise(4.0, 0.04)
+  .posterize(3, 0.5)
+  .luma(0.78, 0.18)
+  .modulateScale(noise(2.0, 0.06), 0.04)
+  .color(0.15, 0.17, 0.19)
+  .saturate(0.18)
+  .mult(solid(0.18, 0.18, 0.18, 1))
+
+// soft radial containment (organic aperture)
+aperture = shape(64, 0.85, 0.9)
+  .modulateScale(noise(0.6, 0.04), 0.03)
+
+solid(0, 0, 0, 1)
+  .add(flow)
+  .add(veins)
+  .add(nodes)
+  .mult(aperture)
+  .out(o0)

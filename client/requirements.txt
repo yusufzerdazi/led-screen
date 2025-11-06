@@ -9,6 +9,13 @@ opencv-python
 pyaudio
 librosa
 
+# Decompression mode dependencies (required for advanced visual effects):
+face-recognition
+mediapipe
+moderngl
+imageio
+imageio-ffmpeg
+
 # Hardware-specific dependencies (not needed for simulation mode):
 # 
 # LED Hardware (Raspberry Pi only):
@@ -23,14 +30,14 @@ librosa
 # librosa - advanced audio analysis
 # Install with: pip install librosa soundfile scipy
 # 
-# Camera and Face Recognition (for decompression mode):
-# opencv-python - camera capture and basic face detection
-# Install with: pip install opencv-python
+# Notes for decompression mode dependencies:
 # 
-# face-recognition - advanced facial recognition (optional)
+# face-recognition - advanced facial recognition and emotion detection
 # Note: Requires dlib which may need compilation on some systems
-# Install with: pip install face-recognition
 # On Raspberry Pi: sudo apt install libopenblas-dev liblapack-dev && pip install face-recognition
 #
-# mediapipe - real-time hand and body tracking for gesture-driven visuals (optional)
+# mediapipe - real-time hand and body tracking for gesture-driven visuals
 # Install with: pip install mediapipe
+#
+# moderngl - GPU-accelerated shader rendering for reflection & refraction effects
+# Install with: pip install moderngl

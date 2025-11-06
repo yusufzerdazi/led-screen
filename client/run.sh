@@ -42,8 +42,8 @@ for arg in "$@"; do
     fi
 done
 
-# Start Hydra only for tush/music mode
-if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]]; then
+# Start Hydra for modes that need it (tush/music/hydra_mask/mask/decompression)
+if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]] || [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]] || [[ "$MODE" == "decompression" ]]; then
     echo "Starting local Hydra instance for $MODE mode..."
     cd "$SCRIPT_DIR/../../hydra" && npm run dev &
     
@@ -54,7 +54,12 @@ if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]]; then
     cd "$SCRIPT_DIR"
     
     echo "Starting $MODE mode..."
-    python3 client.py "$@" &
+    # For hydra_mask mode, run in foreground to allow stdin input
+    if [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]]; then
+        python3 client.py "$@"
+    else
+        python3 client.py "$@" &
+    fi
 else
     echo "Starting $MODE mode (Hydra not needed)..."
     python3 client.py "$@" &
