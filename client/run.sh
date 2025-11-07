@@ -28,6 +28,7 @@ if [ ! -d ".venv" ]; then
     pip install -r requirements.txt
 else
     source .venv/bin/activate
+    pip install -r requirements.txt
 fi
 
 # Parse mode from arguments (default to tush for backward compatibility)

@@ -17,6 +17,8 @@ import math
 import random
 import mediapipe as mp
 import os
+from piper import PiperVoice
+import sounddevice as sd
 
 
 class DecompressionMode(WebsiteMode):
@@ -26,6 +28,21 @@ class DecompressionMode(WebsiteMode):
     - The pupil follows detected faces in camera input
     - The eye blinks intermittently
     - Each element (sclera, iris, pupil, highlights) has different colors
+    
+    Status System:
+    The decompression mode supports multiple statuses with different visual behaviors:
+    - 'eye': Default status showing the 3D eyeball with face-tracking pupil
+    - 'people': Shows people outlines from camera as masks for Hydra visuals
+    
+    To switch statuses, use:
+        mode.set_status('eye')    # Switch to eye status
+        mode.set_status('people') # Switch to people status
+    
+    To get current status:
+        current_status = mode.get_status()
+    
+    Future statuses can be added by implementing new _render_*_status() methods
+    and updating the update() method to route to them.
     """
     
     def __init__(self, width=40, height=30):
@@ -51,6 +68,28 @@ class DecompressionMode(WebsiteMode):
         self.face_detector = None
         self._mp_face_module = mp.solutions.face_detection
         
+        # Mediapipe hand detection
+        self.hand_detector = None
+        self._mp_hands_module = mp.solutions.hands
+        self.hand_wave_history = []  # Track hand x positions for wave detection
+        self.wave_detection_threshold = 0.15  # Minimum movement to detect wave
+        
+        # Mediapipe selfie segmentation for people outlines
+        self.selfie_segmenter = None
+        self._mp_selfie_module = mp.solutions.selfie_segmentation
+        self.people_mask = None  # Current people mask from camera
+        self.people_mask_lock = Lock()
+        
+        # Robust state management system
+        self.current_status = 'eye'  # Current status: 'eye', 'people', 'wave'
+        self.status_lock = Lock()
+        self.status_start_time = time.time()  # When current status started
+        self.status_duration = None  # Duration for timed statuses (None = indefinite)
+        self.status_substate = None  # Sub-state for complex statuses (e.g., 'hand_waving', 'hai_text' for wave)
+        self.previous_status = None  # Track previous status for transitions
+        self.status_transition_callbacks = {}  # Callbacks for status entry/exit
+        self._wave_detected_flag = False  # Flag for wave detection
+        
         # Eye 3D model parameters
         self.eye_center_x = width / 2
         self.eye_center_y = height / 2
@@ -59,7 +98,7 @@ class DecompressionMode(WebsiteMode):
         # Pupil tracking (normalized to [-1, 1] range)
         self.pupil_offset_x = 0.0  # -1 to 1, left to right
         self.pupil_offset_y = 0.0  # -1 to 1, top to bottom
-        self.pupil_smoothing = 0.15  # Smoothing factor for pupil movement
+        self.pupil_smoothing = 0.4  # Smoothing factor for pupil movement (increased for more responsiveness)
         
         # Pupil animation (dilation/constriction)
         self.pupil_base_radius = 0.12  # Base normalized pupil radius (smaller - iris takes more space)
@@ -98,7 +137,7 @@ class DecompressionMode(WebsiteMode):
         self.hydra_frame_lock = Lock()
         
         # Expanding circles effect parameters (glitter effect)
-        self.circle_count = 20  # Number of small circles (glitter particles)
+        self.circle_count = 32  # Number of small circles (glitter particles, increased by 10)
         self.circle_speed = 0.05  # Speed of circle expansion (units per second)
         # Circle diameter: 3-5 pixels. eye_radius is ~12 pixels, so radius is 1.5-2.5px = 0.125-0.208 normalized
         self.circle_max_radius = 0.2  # Radius of each circle (normalized, ~2.4px diameter ~4.8px)
@@ -108,6 +147,16 @@ class DecompressionMode(WebsiteMode):
         
         # Timing
         self.start_time = time.time()
+        
+        # TTS (Text-to-Speech) settings
+        self.tts_voice = None
+        self.tts_message = "welcome to decompression"
+        self.last_tts_time = time.time()
+        self.tts_interval_min = 30.0  # Minimum seconds between TTS messages
+        self.tts_interval_max = 90.0  # Maximum seconds between TTS messages
+        self.next_tts_time = time.time() + random.uniform(self.tts_interval_min, self.tts_interval_max)
+        self.tts_playing = False
+        self.tts_lock = Lock()
     
     def _initialize_circles(self):
         """Initialize glitter circles with random positions and spawn times"""
@@ -128,12 +177,48 @@ class DecompressionMode(WebsiteMode):
         self.url = kwargs.get('url', self.hydra_url)
         super().setup(**kwargs)
     
+    def _load_sketches(self):
+        """Load sketches from sketches.txt and return the last one"""
+        script_dir = os.path.dirname(os.path.abspath(__file__))  # client/modes/
+        sketches_file = os.path.join(script_dir, "sketches.txt")
+        
+        if not os.path.exists(sketches_file):
+            return None
+        
+        try:
+            with open(sketches_file, 'r', encoding='utf-8') as f:
+                lines = [line.strip() for line in f.readlines() if line.strip()]
+            
+            if lines:
+                # Return the last sketch (most recent)
+                return lines[-1]
+            return None
+        except Exception as e:
+            print(f"Error loading sketches: {e}")
+            return None
+    
+    def _build_hydra_url(self):
+        """Build Hydra URL with sketch parameter if available"""
+        url = self.hydra_url
+        
+        # Load sketch from sketches.txt
+        sketch = self._load_sketches()
+        
+        if sketch:
+            # Append sketch parameter to URL
+            if '?' in url:
+                url += f"&sketch={urllib.parse.quote(sketch)}"
+            else:
+                url += f"?sketch={urllib.parse.quote(sketch)}"
+        
+        return url
+    
     def init(self):
         """Initialize camera, face detection, and Hydra visuals"""
         print("Initializing decompression mode (3D eyeball with Hydra visuals)...")
         
-        # Set URL for WebsiteMode parent - just load the raw Hydra website
-        self.url = self.hydra_url
+        # Set URL for WebsiteMode parent - load Hydra with sketch parameter if available
+        self.url = self._build_hydra_url()
         
         # Initialize parent (WebsiteMode) for Hydra rendering
         # This will start the browser and screenshot thread
@@ -178,7 +263,161 @@ class DecompressionMode(WebsiteMode):
             print(f"Warning: Could not initialize Mediapipe face detection: {e}")
             self.face_detector = None
         
+        # Initialize Mediapipe hand detection
+        try:
+            self.hand_detector = self._mp_hands_module.Hands(
+                max_num_hands=1,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5
+            )
+            print("Mediapipe hand detector initialized")
+        except Exception as e:
+            print(f"Warning: Could not initialize Mediapipe hand detection: {e}")
+            self.hand_detector = None
+        
+        # Initialize Mediapipe selfie segmentation for people outlines
+        try:
+            self.selfie_segmenter = self._mp_selfie_module.SelfieSegmentation(
+                model_selection=1  # 0 for general, 1 for landscape (better for full body)
+            )
+            print("Mediapipe selfie segmentation initialized")
+        except Exception as e:
+            print(f"Warning: Could not initialize Mediapipe selfie segmentation: {e}")
+            self.selfie_segmenter = None
+        
+        # Initialize Piper TTS
+        self._init_tts()
+        
         print("Decompression mode (3D eyeball) initialized")
+    
+    def _init_tts(self):
+        """Initialize Piper TTS voice"""
+        # Search for voice models in common locations
+        search_dirs = [
+            os.path.expanduser("~/.local/share/piper/voices"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "voices"),
+        ]
+        
+        model_path = None
+        config_path = None
+        
+        # Search for .onnx files recursively
+        for search_dir in search_dirs:
+            if not os.path.exists(search_dir):
+                continue
+                
+            # Walk through directory tree to find .onnx files
+            for root, dirs, files in os.walk(search_dir):
+                for file in files:
+                    if file.endswith('.onnx'):
+                        model_path = os.path.join(root, file)
+                        # Look for corresponding .json config file
+                        # Try same name with .json extension
+                        config_path = model_path + ".json"
+                        if not os.path.exists(config_path):
+                            # Try without .onnx extension
+                            config_path = model_path.replace(".onnx", ".json")
+                        if not os.path.exists(config_path):
+                            # Try looking in same directory for any .json file with similar name
+                            base_name = os.path.splitext(file)[0]
+                            for json_file in files:
+                                if json_file.endswith('.json') and base_name in json_file:
+                                    config_path = os.path.join(root, json_file)
+                                    break
+                        break
+                if model_path:
+                    break
+            if model_path:
+                break
+        
+        if model_path and os.path.exists(model_path):
+            try:
+                if config_path and os.path.exists(config_path):
+                    self.tts_voice = PiperVoice.load(model_path, config_path)
+                    print(f"Piper TTS initialized with model: {model_path} and config: {config_path}")
+                else:
+                    # Try loading without explicit config (Piper may auto-detect)
+                    self.tts_voice = PiperVoice.load(model_path)
+                    print(f"Piper TTS initialized with model: {model_path} (auto-detected config)")
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load Piper TTS model at {model_path}: {e}\n"
+                    "Make sure you have installed piper-tts: pip install piper-tts"
+                )
+        else:
+            # Provide helpful error message
+            voices_dir = os.path.expanduser("~/.local/share/piper/voices")
+            raise FileNotFoundError(
+                f"Piper TTS model not found in {voices_dir}.\n"
+                "Please download a voice model from https://github.com/rhasspy/piper-voices\n"
+                f"and place the .onnx file (and .json config if available) in {voices_dir}/\n"
+                "You can place it directly in the voices directory or in any subdirectory."
+            )
+    
+    def _play_tts(self, text):
+        """Generate and play TTS audio in a separate thread"""
+        def play_audio():
+            try:
+                with self.tts_lock:
+                    if self.tts_playing:
+                        return  # Already playing
+                    self.tts_playing = True
+                
+                # Synthesize speech - returns a generator of AudioChunk objects
+                audio_generator = self.tts_voice.synthesize(text)
+                
+                # Consume the generator to get audio bytes
+                audio_chunks = []
+                for audio_chunk in audio_generator:
+                    # AudioChunk objects have an audio_int16_bytes attribute
+                    if hasattr(audio_chunk, 'audio_int16_bytes'):
+                        audio_chunks.append(audio_chunk.audio_int16_bytes)
+                    elif hasattr(audio_chunk, 'audio_bytes'):
+                        audio_chunks.append(audio_chunk.audio_bytes)
+                    elif isinstance(audio_chunk, bytes):
+                        audio_chunks.append(audio_chunk)
+                    else:
+                        # Try to convert to bytes
+                        audio_chunks.append(bytes(audio_chunk))
+                
+                # Combine all chunks into a single bytes object
+                audio_data = b''.join(audio_chunks)
+                
+                # Get sample rate from voice config
+                sample_rate = self.tts_voice.config.sample_rate if hasattr(self.tts_voice.config, 'sample_rate') else 22050
+                
+                # Convert to numpy array
+                audio_array = np.frombuffer(audio_data, dtype=np.int16)
+                
+                # Normalize to float32 [-1, 1] for sounddevice
+                audio_float = audio_array.astype(np.float32) / 32768.0
+                
+                # Play audio
+                sd.play(audio_float, samplerate=sample_rate)
+                sd.wait()  # Wait until playback is finished
+                
+            except Exception as e:
+                print(f"Error playing TTS audio: {e}")
+            finally:
+                with self.tts_lock:
+                    self.tts_playing = False
+        
+        # Play in a separate thread to avoid blocking
+        tts_thread = Thread(target=play_audio, daemon=True)
+        tts_thread.start()
+    
+    def _check_and_play_tts(self):
+        """Check if it's time to play TTS and play it"""
+        current_time = time.time()
+        
+        # Check if it's time to play TTS
+        if current_time >= self.next_tts_time:
+            if not self.tts_playing:
+                self._play_tts(self.tts_message)
+                # Schedule next TTS
+                self.next_tts_time = current_time + random.uniform(
+                    self.tts_interval_min, self.tts_interval_max
+                )
     
     def _camera_loop(self):
         """Background thread for camera capture and face detection"""
@@ -194,6 +433,16 @@ class DecompressionMode(WebsiteMode):
                     # Detect faces
                     if self.face_detector:
                         self._detect_faces(frame_rgb)
+                    
+                    # Detect people outlines for people status
+                    if self.selfie_segmenter:
+                        self._detect_people_mask(frame_rgb)
+                    
+                    # Detect hands for wave gesture (only if not already in wave status)
+                    if self.hand_detector:
+                        current_status = self.get_status()
+                        if current_status != 'wave':
+                            self._detect_hand_wave(frame_rgb)
             except Exception as e:
                 print(f"Camera error: {e}")
                 break
@@ -261,6 +510,319 @@ class DecompressionMode(WebsiteMode):
                         )
         except Exception as e:
             print(f"Face detection error: {e}")
+    
+    def _detect_people_mask(self, frame):
+        """Detect people outlines in frame and create mask"""
+        try:
+            results = self.selfie_segmenter.process(frame)
+            
+            if results.segmentation_mask is not None:
+                # Get segmentation mask (values 0.0 to 1.0)
+                mask = results.segmentation_mask
+                
+                # Resize mask to match display dimensions
+                mask_resized = cv2.resize(mask, (self.width, self.height))
+                
+                # Store the mask
+                with self.people_mask_lock:
+                    self.people_mask = mask_resized
+        except Exception as e:
+            print(f"People mask detection error: {e}")
+    
+    def set_status(self, status, duration=None, substate=None):
+        """Set the current status of decompression mode with robust state management
+        
+        Args:
+            status: String status name ('eye', 'people', 'wave', etc.)
+            duration: Optional duration in seconds (None = indefinite)
+            substate: Optional sub-state for complex statuses (e.g., 'hand_waving', 'hai_text' for wave)
+        """
+        with self.status_lock:
+            # Exit previous status
+            if self.current_status != status:
+                self._exit_status(self.current_status)
+                self.previous_status = self.current_status
+            
+            # Set new status
+            self.current_status = status
+            self.status_start_time = time.time()
+            self.status_duration = duration
+            self.status_substate = substate
+            
+            # Enter new status
+            self._enter_status(status, substate)
+            
+            print(f"Decompression mode status changed to: {status}" + 
+                  (f" (substate: {substate})" if substate else "") +
+                  (f" (duration: {duration}s)" if duration else ""))
+    
+    def get_status(self):
+        """Get the current status of decompression mode"""
+        with self.status_lock:
+            return self.current_status
+    
+    def get_status_info(self):
+        """Get detailed status information"""
+        with self.status_lock:
+            elapsed = time.time() - self.status_start_time
+            remaining = None
+            if self.status_duration:
+                remaining = max(0, self.status_duration - elapsed)
+            return {
+                'status': self.current_status,
+                'substate': self.status_substate,
+                'elapsed': elapsed,
+                'remaining': remaining,
+                'previous': self.previous_status
+            }
+    
+    def _enter_status(self, status, substate=None):
+        """Handle status entry logic"""
+        if status == 'wave':
+            # Initialize wave animation
+            self.status_substate = substate or 'hand_waving'
+            self.status_start_time = time.time()
+            # Wave has two phases: hand_waving (2s) then hai_text (3s)
+            self.status_duration = 2.0 if self.status_substate == 'hand_waving' else 3.0
+        elif status == 'eye':
+            # Reset any wave-specific state
+            self.status_substate = None
+        elif status == 'people':
+            # Reset any wave-specific state
+            self.status_substate = None
+    
+    def _exit_status(self, status):
+        """Handle status exit logic"""
+        if status == 'wave':
+            # Clean up wave animation state
+            self.status_substate = None
+    
+    def _update_status_transitions(self):
+        """Update status transitions and timeouts"""
+        current_time = time.time()
+        wave_detected = False
+        next_status = None
+        
+        # Check status transitions (need to release lock before calling set_status)
+        with self.status_lock:
+            elapsed = current_time - self.status_start_time
+            
+            # Handle timed statuses
+            if self.status_duration and elapsed >= self.status_duration:
+                if self.current_status == 'wave':
+                    # Transition wave sub-states
+                    if self.status_substate == 'hand_waving':
+                        # Move to hai_text phase
+                        self.status_substate = 'hai_text'
+                        self.status_start_time = current_time
+                        self.status_duration = 3.0
+                        print("Wave animation: transitioning to 'hai' text")
+                    elif self.status_substate == 'hai_text':
+                        # Wave animation complete, return to previous status or default to eye
+                        next_status = self.previous_status if self.previous_status else 'eye'
+                        print(f"Wave animation complete, returning to: {next_status}")
+                else:
+                    # Other timed statuses - return to default
+                    next_status = 'eye'
+            
+            # Handle automatic status transitions based on conditions
+            # Wave detection triggers wave status
+            if self.current_status != 'wave' and self.hand_detector:
+                # Check for wave in hand detection (will be set by _detect_hand_wave)
+                if self._wave_detected_flag:
+                    self._wave_detected_flag = False
+                    wave_detected = True
+        
+        # Apply status changes outside the lock to avoid deadlock
+        if next_status:
+            self.set_status(next_status)
+        elif wave_detected:
+            self.set_status('wave', duration=5.0, substate='hand_waving')
+    
+    def _detect_hand_wave(self, frame):
+        """Detect hand waving gesture"""
+        try:
+            # Convert to RGB if needed (Mediapipe needs RGB)
+            results = self.hand_detector.process(frame)
+            
+            if results.multi_hand_landmarks:
+                # Get first hand
+                hand_landmarks = results.multi_hand_landmarks[0]
+                
+                # Get wrist x position (landmark 0)
+                wrist_x = hand_landmarks.landmark[0].x
+                
+                # Add to history
+                self.hand_wave_history.append(wrist_x)
+                
+                # Keep only last 15 frames (~0.5 seconds at 30fps)
+                if len(self.hand_wave_history) > 15:
+                    self.hand_wave_history.pop(0)
+                
+                # Detect wave: check for left-right-left or right-left-right motion
+                if len(self.hand_wave_history) >= 15:
+                    # Calculate movement range
+                    min_x = min(self.hand_wave_history)
+                    max_x = max(self.hand_wave_history)
+                    movement_range = max_x - min_x
+                    
+                    # Check for significant movement (wave)
+                    if movement_range > self.wave_detection_threshold:
+                        # Detect oscillation (wave pattern)
+                        # Count direction changes
+                        direction_changes = 0
+                        for i in range(1, len(self.hand_wave_history) - 1):
+                            # Check if direction changed
+                            prev_diff = self.hand_wave_history[i] - self.hand_wave_history[i-1]
+                            next_diff = self.hand_wave_history[i+1] - self.hand_wave_history[i]
+                            if (prev_diff > 0 and next_diff < 0) or (prev_diff < 0 and next_diff > 0):
+                                direction_changes += 1
+                        
+                        # If at least 2 direction changes, it's a wave
+                        if direction_changes >= 2:
+                            print("Wave detected!")
+                            # Set flag for status system to pick up
+                            self._wave_detected_flag = True
+                            self.hand_wave_history = []  # Reset to avoid re-triggering
+            else:
+                # No hand detected - clear history
+                self.hand_wave_history = []
+                
+        except Exception as e:
+            print(f"Hand detection error: {e}")
+    
+    def _render_wave_status(self):
+        """Render the wave status (hand wave and 'hai' text animation)"""
+        status_info = self.get_status_info()
+        elapsed = status_info['elapsed']
+        substate = status_info['substate']
+        
+        if substate == 'hand_waving':
+            return self._render_waving_hand(elapsed)
+        elif substate == 'hai_text':
+            return self._render_hai_text(elapsed)
+        else:
+            # Default to hand_waving if substate not set
+            return self._render_waving_hand(elapsed)
+    
+    def _render_waving_hand(self, elapsed):
+        """Render clear waving hand for 40x30 screen"""
+        img = Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
+        pixels = np.array(img)
+        
+        # Hand color (skin tone)
+        hand_color = (255, 220, 177)
+        
+        # Wave animation: hand rocks left and right
+        wave_phase = math.sin(elapsed * 5)  # Oscillate
+        
+        # Center position
+        cx, cy = self.width // 2, self.height // 2
+        
+        # Draw a clearer hand shape (side view, palm forward)
+        # Wrist/arm (bottom)
+        for y in range(4):
+            for x in range(-2, 3):
+                px, py = cx + x, cy + 8 + y
+                if 0 <= px < self.width and 0 <= py < self.height:
+                    pixels[py, px] = hand_color
+        
+        # Palm (middle, wider)
+        for y in range(8):
+            for x in range(-3, 4):
+                px, py = cx + x, cy + y
+                if 0 <= px < self.width and 0 <= py < self.height:
+                    pixels[py, px] = hand_color
+        
+        # Fingers (top) - 4 fingers with wave motion
+        finger_positions = [-2, -1, 1, 2]  # Skip middle for spacing
+        for i, fx in enumerate(finger_positions):
+            # Each finger waves with phase offset
+            finger_offset = int(wave_phase * 3 + math.sin(i * 1.5) * 2)
+            # Finger length
+            for fy in range(5):
+                px = cx + fx + finger_offset
+                py = cy - 1 - fy
+                if 0 <= px < self.width and 0 <= py < self.height:
+                    pixels[py, px] = hand_color
+        
+        # Thumb (side, shorter)
+        thumb_offset = int(wave_phase * 2)
+        for ty in range(3):
+            px = cx - 4 + thumb_offset
+            py = cy + 2 - ty
+            if 0 <= px < self.width and 0 <= py < self.height:
+                pixels[px, py] = hand_color
+        
+        return Image.fromarray(pixels)
+    
+    def _render_hai_text(self, elapsed):
+        """Render wavy 'hai' text"""
+        img = Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
+        pixels = np.array(img)
+        
+        # Text color (bright, friendly)
+        text_color = (100, 200, 255)  # Cyan
+        
+        # Simple pixel font for "hai"
+        # Center text
+        cx, cy = self.width // 2, self.height // 2
+        
+        # Wave effect: vertical offset based on time and x position
+        wave_frequency = 2.0
+        wave_amplitude = 2.0
+        
+        # Letter patterns (5x7 simple pixel font)
+        # H
+        h_pattern = [
+            [1,0,1],
+            [1,0,1],
+            [1,1,1],
+            [1,0,1],
+            [1,0,1]
+        ]
+        
+        # A
+        a_pattern = [
+            [0,1,0],
+            [1,0,1],
+            [1,1,1],
+            [1,0,1],
+            [1,0,1]
+        ]
+        
+        # I
+        i_pattern = [
+            [1,1,1],
+            [0,1,0],
+            [0,1,0],
+            [0,1,0],
+            [1,1,1]
+        ]
+        
+        letters = [h_pattern, a_pattern, i_pattern]
+        letter_spacing = 4
+        
+        # Calculate total width
+        total_width = len(letters) * 3 + (len(letters) - 1) * letter_spacing
+        start_x = cx - total_width // 2
+        
+        # Draw each letter
+        for letter_idx, letter in enumerate(letters):
+            letter_x = start_x + letter_idx * (3 + letter_spacing)
+            
+            for row_idx, row in enumerate(letter):
+                for col_idx, pixel in enumerate(row):
+                    if pixel == 1:
+                        px = letter_x + col_idx
+                        # Apply wave effect
+                        wave_offset = int(wave_amplitude * math.sin(elapsed * wave_frequency + px * 0.5))
+                        py = cy - 2 + row_idx + wave_offset
+                        
+                        if 0 <= px < self.width and 0 <= py < self.height:
+                            pixels[py, px] = text_color
+        
+        return Image.fromarray(pixels)
     
     def _update_hydra_frame(self):
         """Update the cached frame from Hydra"""
@@ -334,19 +896,20 @@ class DecompressionMode(WebsiteMode):
             # Inside eye - no background
             return 0.0
         
-        # Outside eye - gradient from 0 at edge to 1.0 far away
+        # Outside eye - gradient from 0 at edge to maximum at far away
         # Add some space between eye and background
-        gradient_start = eye_edge + 0.15  # Start gradient 0.15 units outside eye
-        gradient_end = eye_edge + 0.5    # Full intensity 0.5 units outside
+        gradient_start = eye_edge + 0.2  # Start gradient 0.2 units outside eye
+        gradient_end = eye_edge + 1.5    # Full intensity 1.5 units outside
+        gradient_max = 0.8  # Maximum gradient intensity (80% max brightness)
         
         if dist_from_center < gradient_start:
             return 0.0
         elif dist_from_center > gradient_end:
-            return 1.0
+            return gradient_max
         else:
-            # Linear gradient
+            # Linear gradient up to max
             gradient = (dist_from_center - gradient_start) / (gradient_end - gradient_start)
-            return gradient
+            return gradient * gradient_max
     
     def _get_circle_mask_value(self, nx, ny, dist_from_center, current_time):
         """Check if pixel is inside any translating circle and return mask value
@@ -417,8 +980,88 @@ class DecompressionMode(WebsiteMode):
         
         return None
     
+    def _get_sunbeam_mask_value(self, nx, ny, dist_from_center, current_time):
+        """Check if pixel is inside any rotating sunbeam and return mask value
+        
+        Args:
+            nx, ny: Normalized coordinates (-1 to 1)
+            dist_from_center: Distance from eye center (normalized)
+            current_time: Current time for animation
+            
+        Returns:
+            float: Maximum mask value (0.0 to 1.0) if inside a sunbeam, None otherwise
+        """
+        eye_edge = 1.0
+        
+        # Only show sunbeams outside the eye
+        if dist_from_center <= eye_edge:
+            return None
+        
+        # Don't show sunbeams too far away
+        if dist_from_center > eye_edge + self.sunbeam_length:
+            return None
+        
+        # Calculate angle from center
+        angle = math.atan2(ny, nx)
+        
+        max_mask_value = 0.0
+        
+        # Check each sunbeam
+        for i in range(self.sunbeam_count):
+            # Calculate sunbeam angle (rotating)
+            beam_base_angle = (2.0 * math.pi / self.sunbeam_count) * i
+            beam_angle = beam_base_angle + current_time * self.sunbeam_rotation_speed
+            
+            # Normalize angle difference
+            angle_diff = abs(angle - beam_angle)
+            if angle_diff > math.pi:
+                angle_diff = 2.0 * math.pi - angle_diff
+            
+            # Check if pixel is within sunbeam width
+            if angle_diff < self.sunbeam_width / 2.0:
+                # Calculate distance from eye edge
+                distance_from_edge = dist_from_center - eye_edge
+                
+                # Check if pixel is within sunbeam length
+                if distance_from_edge <= self.sunbeam_length:
+                    # Calculate mask value based on distance along beam
+                    # Fade out along the length of the beam
+                    normalized_distance = distance_from_edge / self.sunbeam_length
+                    length_falloff = 1.0 - (normalized_distance * self.sunbeam_falloff)
+                    
+                    # Also fade based on angular distance from center of beam
+                    angular_falloff = 1.0 - (angle_diff / (self.sunbeam_width / 2.0))
+                    
+                    # Combine both falloffs
+                    mask_value = length_falloff * angular_falloff
+                    max_mask_value = max(max_mask_value, mask_value)
+        
+        if max_mask_value > 0.0:
+            return max_mask_value
+        
+        return None
+    
     def update(self):
-        """Update and return current frame with 3D eyeball"""
+        """Update and return current frame based on current status"""
+        # Check if it's time to play TTS
+        self._check_and_play_tts()
+        
+        # Update status transitions and timeouts
+        self._update_status_transitions()
+        
+        # Get current status
+        status = self.get_status()
+        
+        # Route to appropriate render method based on status
+        if status == 'wave':
+            return self._render_wave_status()
+        elif status == 'people':
+            return self._render_people_status()
+        else:  # Default to 'eye' status
+            return self._render_eye_status()
+    
+    def _render_eye_status(self):
+        """Render the eye status (original 3D eyeball)"""
         # Update Hydra frame (raw visual from website)
         self._update_hydra_frame()
         
@@ -435,6 +1078,52 @@ class DecompressionMode(WebsiteMode):
         img = self._render_eyeball()
         
         return img
+    
+    def _render_people_status(self):
+        """Render the people status using people masks as Hydra mask source"""
+        # Update Hydra frame (raw visual from website)
+        self._update_hydra_frame()
+        
+        # Create image with black background
+        img = Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
+        pixels = np.array(img)
+        
+        # Get people mask
+        with self.people_mask_lock:
+            people_mask = self.people_mask
+        
+        if people_mask is None:
+            # No mask available yet, return black
+            return img
+        
+        # Render Hydra visual masked by people outlines
+        for y in range(self.height):
+            for x in range(self.width):
+                # Get mask value at this pixel (0.0 to 1.0)
+                # Horizontally flip the mask (mirror effect)
+                flipped_x = self.width - 1 - x
+                mask_value = people_mask[y, flipped_x]
+                
+                if mask_value > 0.01:  # Only render where people are detected
+                    # Convert pixel coordinates to normalized coordinates (-1 to 1)
+                    nx = (x - self.width / 2) / (self.width / 2)
+                    ny = (y - self.height / 2) / (self.height / 2)
+                    
+                    # Get Hydra color
+                    hydra_color = self._get_hydra_texture_color(nx, ny, normalize_brightness=False)
+                    
+                    if hydra_color:
+                        # Apply mask value to Hydra color
+                        # Use mask value directly for brightness
+                        effect_color = np.array(hydra_color, dtype=float) * mask_value
+                        pixels[y, x] = tuple(np.clip(effect_color, 0, 255).astype(np.uint8))
+                    else:
+                        pixels[y, x] = (0, 0, 0)
+                else:
+                    # No person detected at this pixel
+                    pixels[y, x] = (0, 0, 0)
+        
+        return Image.fromarray(pixels)
     
     def _update_pupil_position(self):
         """Update pupil position based on detected face"""
@@ -549,24 +1238,26 @@ class DecompressionMode(WebsiteMode):
                     # Outside eye - show Hydra visual inside circles with gradient mask
                     current_time = time.time() - self.start_time
                     
-                    # Get background gradient
-                    bg_gradient = self._get_background_gradient(nx, ny, eye_dist)
-                    
                     # Get circle mask (check for circles outside the eye)
                     circle_mask = self._get_circle_mask_value(nx, ny, eye_dist, current_time)
                     
-                    if circle_mask is not None and circle_mask > 0.0:
-                        # Pixel is inside a circle - show Hydra visual masked by circle AND gradient
-                        hydra_color = self._get_hydra_texture_color(nx, ny)
+                    # Only show visual where there are circles
+                    if circle_mask is not None and circle_mask > 0.01:
+                        # Get background gradient to apply on top
+                        bg_gradient = self._get_background_gradient(nx, ny, eye_dist)
+                        
+                        # Get Hydra color WITHOUT brightness normalization
+                        hydra_color = self._get_hydra_texture_color(nx, ny, normalize_brightness=False)
                         if hydra_color:
-                            # Apply both circle mask and gradient mask
-                            circle_color = np.array(hydra_color) * circle_mask * bg_gradient
-                            pixels[y, x] = tuple(np.clip(circle_color, 0, 255).astype(np.uint8))
+                            # Apply BOTH masks: circle mask AND gradient mask
+                            # This should result in max 20% brightness (0.2 gradient max)
+                            final_brightness = circle_mask * bg_gradient
+                            effect_color = np.array(hydra_color, dtype=float) * final_brightness
+                            pixels[y, x] = tuple(np.clip(effect_color, 0, 255).astype(np.uint8))
                         else:
-                            # No Hydra visual - show black
                             pixels[y, x] = (0, 0, 0)
                     else:
-                        # Not in a circle - show black (no background)
+                        # Not in a circle - show black
                         pixels[y, x] = (0, 0, 0)
         
         return Image.fromarray(pixels)
@@ -729,13 +1420,11 @@ class DecompressionMode(WebsiteMode):
                 # Use Hydra texture color (already normalized to same brightness)
                 base_color = np.array(hydra_color)
                 
-                # Transform black pixels to white (only inside iris)
-                # Check if pixel is black or very dark (brightness < threshold)
-                brightness = np.mean(base_color) / 255.0
-                if brightness == 0: # black pixesls
-                    # Convert to bright white, but respect overall brightness
-                    # Use a bright but not maximum white to respect LED brightness settings
-                    base_color = np.array([240, 240, 240])  # Bright white (not pure 255)
+                # Transform ONLY precisely black pixels to white (only inside iris)
+                # Check for exactly black pixels
+                if base_color[0] == 0 and base_color[1] == 0 and base_color[2] == 0:
+                    # Convert to white (will be normalized with others)
+                    base_color = np.array([255, 255, 255])
                 
                 # Apply lighting to texture
                 # The LED brightness will be applied later at the hardware level
@@ -792,5 +1481,21 @@ class DecompressionMode(WebsiteMode):
             except AttributeError:
                 pass
             self.face_detector = None
+        
+        # Release mediapipe hand detector
+        if self.hand_detector:
+            try:
+                self.hand_detector.close()
+            except AttributeError:
+                pass
+            self.hand_detector = None
+        
+        # Release mediapipe selfie segmenter
+        if self.selfie_segmenter:
+            try:
+                self.selfie_segmenter.close()
+            except AttributeError:
+                pass
+            self.selfie_segmenter = None
         
         print("Decompression mode cleaned up")

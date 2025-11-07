@@ -476,7 +476,7 @@ if __name__ == '__main__':
             leds = simulation.Leds(40, 30)
         else:
             if WS2812_AVAILABLE:
-                leds = ws2812.Leds(40, 30, 0.5)  # 10% brightness (matching main branch)
+                leds = ws2812.Leds(40, 30, 0.1)  # 10% brightness (matching main branch)
             else:
                 print("WARNING: ws2812 hardware not available, falling back to simulation mode")
                 print("To use real hardware, ensure you're on a Raspberry Pi with required dependencies")
@@ -514,6 +514,10 @@ if __name__ == '__main__':
         client.set_mode(mode)
 
         client.init()
+        
+        # Set decompression mode to 'people' status for testing
+        if mode_name == 'decompression' and hasattr(mode, 'set_status'):
+            mode.set_status('people')
 
         # Start the main loop
         # In simulation mode, this will block in the Qt event loop
