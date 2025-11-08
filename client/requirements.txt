@@ -45,3 +45,7 @@ openai-whisper
 #
 # moderngl - GPU-accelerated shader rendering for reflection & refraction effects
 # Install with: pip install moderngl
+
+# Console UI
+rich
+psutil

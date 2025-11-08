@@ -1,0 +1,1101 @@
+"""
+Kaleidoscape - Rich Console Interface for Service Monitoring and Debugging
+
+Provides a comprehensive monitoring dashboard with:
+- Service status overview
+- Performance metrics (FPS tracking)
+- Recent logs from all services
+- Manual control interface
+"""
+
+import time
+import threading
+import sys
+import os
+from collections import deque
+from typing import Optional, Dict, List, Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+import queue
+import io
+
+# Try to import psutil for system monitoring
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
+try:
+    from rich.console import Console
+    from rich.layout import Layout
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+    from rich.live import Live
+    from rich.prompt import Prompt
+    from rich import box
+    from rich.align import Align
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+    print("Warning: rich library not available. Install with: pip install rich")
+
+
+@dataclass
+class ServiceStatus:
+    """Status information for a service"""
+    name: str
+    status: str = "Unknown"  # "Running", "Stopped", "Error", etc.
+    details: str = ""
+    last_update: float = field(default_factory=time.time)
+    fps: Optional[float] = None
+    frame_count: int = 0
+    error_count: int = 0
+    enabled: bool = True  # Whether service is enabled/disabled
+
+
+@dataclass
+class LogEntry:
+    """A log entry from any service"""
+    timestamp: float
+    service: str
+    level: str  # "INFO", "WARNING", "ERROR", "DEBUG"
+    message: str
+
+
+class LogCapture:
+    """Captures logs from all services"""
+    
+    def __init__(self, max_logs: int = 100):
+        self.logs: deque = deque(maxlen=max_logs)
+        self.lock = threading.Lock()
+    
+    def add_log(self, service: str, level: str, message: str):
+        """Add a log entry"""
+        with self.lock:
+            self.logs.append(LogEntry(
+                timestamp=time.time(),
+                service=service,
+                level=level,
+                message=message
+            ))
+    
+    def get_recent_logs(self, count: int = 20) -> List[LogEntry]:
+        """Get recent log entries"""
+        with self.lock:
+            return list(self.logs)[-count:]
+
+
+class SystemMonitor:
+    """Monitors system CPU and memory usage"""
+    
+    def __init__(self, max_samples: int = 60):
+        self.max_samples = max_samples
+        self.cpu_history: deque = deque(maxlen=max_samples)
+        self.memory_history: deque = deque(maxlen=max_samples)
+        self.lock = threading.Lock()
+        self.process = None
+        self.cpu_count = 1
+        if PSUTIL_AVAILABLE:
+            try:
+                self.process = psutil.Process(os.getpid())
+                self.cpu_count = psutil.cpu_count() or 1  # Get number of CPU cores
+            except Exception:
+                pass
+    
+    def update(self):
+        """Update system metrics"""
+        if not PSUTIL_AVAILABLE:
+            return
+        
+        with self.lock:
+            try:
+                # Get system-wide CPU usage (can exceed 100% on multi-core)
+                cpu_percent = psutil.cpu_percent(interval=None)
+                
+                # Get process memory
+                if self.process:
+                    memory_info = self.process.memory_info()
+                    memory_mb = memory_info.rss / 1024 / 1024  # Convert to MB
+                else:
+                    # Fallback to system memory if process not available
+                    memory_info = psutil.virtual_memory()
+                    memory_mb = memory_info.used / 1024 / 1024
+                
+                self.cpu_history.append(cpu_percent)
+                self.memory_history.append(memory_mb)
+            except Exception:
+                pass
+    
+    def get_cpu_stats(self) -> Dict:
+        """Get CPU statistics"""
+        with self.lock:
+            if not self.cpu_history:
+                return {'current': 0.0, 'avg': 0.0, 'max': 0.0, 'history': []}
+            
+            history = list(self.cpu_history)
+            return {
+                'current': history[-1] if history else 0.0,
+                'avg': sum(history) / len(history) if history else 0.0,
+                'max': max(history) if history else 0.0,
+                'history': history
+            }
+    
+    def get_memory_stats(self) -> Dict:
+        """Get memory statistics"""
+        with self.lock:
+            if not self.memory_history:
+                return {'current': 0.0, 'avg': 0.0, 'max': 0.0, 'history': []}
+            
+            history = list(self.memory_history)
+            return {
+                'current': history[-1] if history else 0.0,
+                'avg': sum(history) / len(history) if history else 0.0,
+                'max': max(history) if history else 0.0,
+                'history': history
+            }
+
+
+class PerformanceTracker:
+    """Tracks performance metrics for services"""
+    
+    def __init__(self):
+        self.trackers: Dict[str, Dict] = {}
+        self.lock = threading.Lock()
+    
+    def update(self, service_name: str, frame_time: Optional[float] = None):
+        """Update performance metrics for a service"""
+        with self.lock:
+            if service_name not in self.trackers:
+                self.trackers[service_name] = {
+                    'frame_times': deque(maxlen=60),  # Keep last 60 frames
+                    'last_frame_time': time.time(),
+                    'frame_count': 0,
+                    'total_time': 0.0
+                }
+            
+            tracker = self.trackers[service_name]
+            current_time = time.time()
+            
+            if frame_time is not None:
+                tracker['frame_times'].append(frame_time)
+            else:
+                # Calculate frame time from last update
+                elapsed = current_time - tracker['last_frame_time']
+                if elapsed > 0:
+                    tracker['frame_times'].append(elapsed)
+            
+            tracker['last_frame_time'] = current_time
+            tracker['frame_count'] += 1
+    
+    def get_fps(self, service_name: str) -> Optional[float]:
+        """Get current FPS for a service"""
+        with self.lock:
+            if service_name not in self.trackers:
+                return None
+            
+            tracker = self.trackers[service_name]
+            frame_times = list(tracker['frame_times'])
+            
+            if len(frame_times) < 2:
+                return None
+            
+            # Calculate average FPS from recent frame times
+            avg_frame_time = sum(frame_times) / len(frame_times)
+            if avg_frame_time > 0:
+                return 1.0 / avg_frame_time
+            return None
+    
+    def get_stats(self, service_name: str) -> Dict:
+        """Get performance statistics for a service"""
+        with self.lock:
+            if service_name not in self.trackers:
+                return {}
+            
+            tracker = self.trackers[service_name]
+            frame_times = list(tracker['frame_times'])
+            
+            stats = {
+                'frame_count': tracker['frame_count'],
+                'fps': self.get_fps(service_name)
+            }
+            
+            if frame_times:
+                stats['avg_frame_time'] = sum(frame_times) / len(frame_times)
+                stats['min_frame_time'] = min(frame_times)
+                stats['max_frame_time'] = max(frame_times)
+            
+            return stats
+
+
+class PrintInterceptor:
+    """Intercepts print statements and redirects to log capture"""
+    
+    def __init__(self, log_capture: LogCapture):
+        self.log_capture = log_capture
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+        self.buffer = io.StringIO()
+        self.enabled = False
+    
+    def enable(self):
+        """Enable print interception"""
+        self.enabled = True
+        sys.stdout = self
+        sys.stderr = self
+    
+    def disable(self):
+        """Disable print interception"""
+        self.enabled = False
+        sys.stdout = self.original_stdout
+        sys.stderr = self.original_stderr
+    
+    def write(self, text):
+        """Write intercepted text to log capture without printing to terminal"""
+        if not text.strip():
+            return
+        
+        # Capture logs in background to avoid blocking
+        if self.enabled:
+            # Determine service and level from text
+            service = "System"
+            level = "INFO"
+            
+            # Check for service prefixes
+            if "[STT]" in text:
+                service = "Audio (STT)"
+            elif "TTS" in text or "Piper" in text:
+                service = "Audio (TTS)"
+            elif "Camera" in text or "camera" in text:
+                service = "Camera"
+            elif "Face" in text or "face" in text:
+                service = "Face Detection"
+            elif "Gesture" in text or "gesture" in text:
+                service = "Gesture Detection"
+            elif "Video" in text or "video" in text:
+                service = "Video Manager"
+            elif "Mask" in text or "mask" in text or "Segmentation" in text:
+                service = "People Segmentation"
+            elif "Error" in text or "error" in text or "ERROR" in text or "Traceback" in text:
+                level = "ERROR"
+            elif "Warning" in text or "warning" in text or "WARNING" in text:
+                level = "WARNING"
+            
+            # Add to log capture (non-blocking, don't let errors break UI)
+            try:
+                self.log_capture.add_log(service, level, text.strip())
+            except Exception:
+                pass  # Don't let log capture errors break the UI
+        
+        # Don't write to original stdout/stderr - Rich handles display
+        # This prevents errors from interfering with Live widget
+    
+    def flush(self):
+        """Flush stdout (no-op to prevent interference)"""
+        pass
+
+
+class KaleidoscapeUI:
+    """Main console UI for Kaleidoscape monitoring"""
+    
+    def __init__(self, client=None, mode=None):
+        if not RICH_AVAILABLE:
+            raise ImportError("rich library is required. Install with: pip install rich")
+        
+        self.client = client
+        self.mode = mode
+        self.console = Console()
+        self.log_capture = LogCapture(max_logs=200)
+        self.performance = PerformanceTracker()
+        self.system_monitor = SystemMonitor(max_samples=60)
+        self.services: Dict[str, ServiceStatus] = {}
+        self.running = False
+        self.command_queue = queue.Queue()
+        self.command_handlers: Dict[str, Callable] = {}
+        
+        # Input state for displaying current input in UI
+        self.current_input = ""
+        self.input_lock = threading.Lock()
+        
+        # Print interceptor (optional, not enabled by default)
+        self.print_interceptor = PrintInterceptor(self.log_capture)
+        
+        # Set up centralized logging for services
+        self._setup_service_logging()
+        
+        # Initialize service statuses
+        self._init_services()
+        self._init_command_handlers()
+        
+        # Start update thread
+        self.update_thread = None
+    
+    def _init_services(self):
+        """Initialize service status tracking"""
+        self.services = {
+            'LED Display': ServiceStatus(name='LED Display'),
+            'Camera': ServiceStatus(name='Camera'),
+            'Face Detection': ServiceStatus(name='Face Detection'),
+            'Gesture Detection': ServiceStatus(name='Gesture Detection'),
+            'People Segmentation': ServiceStatus(name='People Segmentation'),
+            'Audio (TTS)': ServiceStatus(name='Audio (TTS)'),
+            'Audio (STT)': ServiceStatus(name='Audio (STT)'),
+            'Video Manager': ServiceStatus(name='Video Manager'),
+        }
+    
+    def _setup_service_logging(self):
+        """Set up centralized logging so services can log to the console UI"""
+        try:
+            from logger import set_log_callback
+            set_log_callback(self.log)
+        except ImportError:
+            # Logger module not available, services will use print
+            pass
+    
+    def _init_command_handlers(self):
+        """Initialize command handlers"""
+        self.command_handlers = {
+            'status': self._cmd_set_status,
+            'wave': self._cmd_trigger_wave,
+            'thumbs_up': self._cmd_trigger_thumbs_up,
+            'smile': self._cmd_trigger_smile,
+            'eye': lambda: self._cmd_set_status('eye'),
+            'people': lambda: self._cmd_set_status('people'),
+            'start': self._cmd_start_service,
+            'stop': self._cmd_stop_service,
+            'enable': self._cmd_enable_service,
+            'disable': self._cmd_disable_service,
+            'help': self._cmd_help,
+        }
+    
+    def log(self, service: str, level: str, message: str):
+        """Add a log entry"""
+        self.log_capture.add_log(service, level, message)
+    
+    def update_service_status(self, service_name: str, status: str, details: str = "", fps: Optional[float] = None):
+        """Update status of a service"""
+        if service_name in self.services:
+            self.services[service_name].status = status
+            self.services[service_name].details = details
+            self.services[service_name].last_update = time.time()
+            if fps is not None:
+                self.services[service_name].fps = fps
+    
+    def track_performance(self, service_name: str, frame_time: Optional[float] = None):
+        """Track performance for a service"""
+        self.performance.update(service_name, frame_time)
+        fps = self.performance.get_fps(service_name)
+        if fps is not None:
+            self.update_service_status(service_name, "Running", f"FPS: {fps:.1f}", fps)
+    
+    def _create_status_table(self) -> Table:
+        """Create status overview table"""
+        # Use compact column widths to prevent overflow
+        table = Table(title="Service Status", box=box.ROUNDED, show_header=True, header_style="bold magenta", show_lines=False)
+        table.add_column("Service", style="cyan", width=12, no_wrap=True)
+        table.add_column("Status", width=8, no_wrap=True)
+        table.add_column("FPS", justify="right", width=6, no_wrap=True)
+        table.add_column("Details", width=18, no_wrap=False)  # Allow wrapping for details
+        
+        for service in self.services.values():
+            # Color code status
+            status_style = {
+                "Running": "green",
+                "Stopped": "red",
+                "Error": "red bold",
+                "Initializing": "yellow",
+                "Unknown": "dim"
+            }.get(service.status, "white")
+            
+            fps_str = f"{service.fps:.1f}" if service.fps else "N/A"
+            
+            # Shorten service names to fit
+            short_name = service.name
+            if len(short_name) > 12:
+                short_name = short_name[:9] + "..."
+            
+            # Shorten details to fit
+            details = service.details or "-"
+            if len(details) > 18:
+                details = details[:15] + "..."
+            
+            table.add_row(
+                short_name,
+                Text(service.status, style=status_style),
+                fps_str,
+                details
+            )
+        
+        return table
+    
+    def _create_logs_panel(self) -> Panel:
+        """Create logs panel"""
+        logs = self.log_capture.get_recent_logs(8)  # Reduced to prevent overflow
+        
+        if not logs:
+            return Panel("No logs yet", title="Recent Logs", border_style="blue", padding=(0, 1))
+        
+        log_text = Text()
+        for log in logs:
+            # Format timestamp
+            dt = datetime.fromtimestamp(log.timestamp)
+            time_str = dt.strftime("%H:%M:%S")
+            
+            # Color code by level
+            level_colors = {
+                "ERROR": "red",
+                "WARNING": "yellow",
+                "INFO": "blue",
+                "DEBUG": "dim"
+            }
+            level_color = level_colors.get(log.level, "white")
+            
+            # Truncate long messages
+            message = log.message
+            if len(message) > 50:
+                message = message[:47] + "..."
+            
+            log_text.append(f"[{time_str}] ", style="dim")
+            log_text.append(f"[{log.service}] ", style="cyan")
+            log_text.append(f"{log.level}: ", style=level_color)
+            log_text.append(f"{message}\n", style="white")
+        
+        return Panel(log_text, title="Recent Logs", border_style="blue", padding=(0, 1))
+    
+    def _create_performance_panel(self) -> Panel:
+        """Create performance metrics panel with CPU/memory graphs"""
+        # Get overall FPS
+        overall_fps = self.performance.get_fps('LED Display')
+        overall_fps_str = f"{overall_fps:.1f}" if overall_fps else "N/A"
+        
+        # Get mode-specific status if available (with error handling)
+        mode_info = ""
+        if self.mode and hasattr(self.mode, 'get_status'):
+            try:
+                current_status = self.mode.get_status()
+                mode_info = f"Mode Status: {current_status}\n"
+            except Exception:
+                mode_info = "Mode Status: Error\n"  # Don't block on mode status
+        
+        # Get system stats
+        cpu_stats = self.system_monitor.get_cpu_stats()
+        memory_stats = self.system_monitor.get_memory_stats()
+        
+        # Calculate normalized CPU (percentage of total cores)
+        cpu_count = self.system_monitor.cpu_count
+        cpu_current_raw = cpu_stats['current']
+        cpu_current_norm = min(100.0, (cpu_current_raw / cpu_count)) if cpu_count > 0 else cpu_current_raw
+        cpu_avg_norm = min(100.0, (cpu_stats['avg'] / cpu_count)) if cpu_count > 0 else cpu_stats['avg']
+        cpu_max_norm = min(100.0, (cpu_stats['max'] / cpu_count)) if cpu_count > 0 else cpu_stats['max']
+        
+        # Build performance text more compactly
+        perf_text = f"FPS: {overall_fps_str}\n"
+        
+        if mode_info:
+            perf_text += f"{mode_info}"
+        
+        perf_text += f"CPU: {cpu_current_norm:.1f}% ({cpu_count} cores)\n"
+        perf_text += f"  Avg: {cpu_avg_norm:.1f}% Max: {cpu_max_norm:.1f}%\n"
+        
+        # Add CPU graph (normalized to 0-100%)
+        if cpu_stats['history']:
+            normalized_history = [min(100.0, (v / cpu_count)) if cpu_count > 0 else v for v in cpu_stats['history']]
+            perf_text += self._create_sparkline(normalized_history, 0, 100)
+        
+        perf_text += f"Mem: {memory_stats['current']:.0f}MB\n"
+        perf_text += f"  Avg: {memory_stats['avg']:.0f}MB Max: {memory_stats['max']:.0f}MB\n"
+        
+        # Add memory graph
+        if memory_stats['history']:
+            max_mem = max(memory_stats['history']) if memory_stats['history'] else 100
+            perf_text += self._create_sparkline(memory_stats['history'], 0, max_mem * 1.1)
+        
+        # Add per-service FPS (compact, single line)
+        fps_list = []
+        for service_name in ['Camera', 'Face Detection', 'Gesture Detection', 'People Segmentation']:
+            fps = self.performance.get_fps(service_name)
+            if fps:
+                short_name = service_name.replace(' Detection', '').replace(' Segmentation', '')
+                fps_list.append(f"{short_name}:{fps:.1f}")
+        
+        if fps_list:
+            perf_text += f"FPS: {', '.join(fps_list)}\n"
+        
+        # Return just the text, we'll wrap it in Panel in layout
+        return perf_text
+    
+    def _create_sparkline(self, data: List[float], min_val: float, max_val: float, width: int = 15) -> str:
+        """Create a simple ASCII sparkline graph"""
+        if not data or max_val <= min_val:
+            return "  (no data)\n"
+        
+        # Normalize data to 0-1 range
+        normalized = [(v - min_val) / (max_val - min_val) for v in data]
+        normalized = [max(0.0, min(1.0, v)) for v in normalized]  # Clamp
+        
+        # Use block characters for better visualization
+        blocks = "▁▂▃▄▅▆▇█"
+        block_count = len(blocks)
+        
+        # Sample data if too long (ensure it fits)
+        if len(normalized) > width:
+            step = len(normalized) / width
+            sampled = [normalized[int(i * step)] for i in range(width)]
+        else:
+            sampled = normalized
+        
+        # Create sparkline (ensure it fits on one line, max width)
+        sparkline = "  "
+        for val in sampled:
+            idx = int(val * (block_count - 1))
+            sparkline += blocks[idx]
+        
+        return sparkline + "\n"
+    
+    def _create_input_panel(self) -> Panel:
+        """Create input display panel"""
+        with self.input_lock:
+            current_input_display = self.current_input if self.current_input else ""
+        
+        # Truncate if too long to prevent overflow
+        max_len = 40
+        if len(current_input_display) > max_len:
+            current_input_display = current_input_display[:max_len-3] + "..."
+        
+        # Use simple text without Rich formatting that might cause width issues
+        content = f"Kaleidoscape> {current_input_display}█"
+        return Panel(content, title="Input", border_style="cyan", padding=(0, 1))
+    
+    def _create_layout(self) -> Layout:
+        """Create the main layout"""
+        layout = Layout()
+        
+        layout.split_column(
+            Layout(name="header", size=3),
+            Layout(name="body")
+        )
+        
+        layout["body"].split_row(
+            Layout(name="left"),
+            Layout(name="logs")
+        )
+        
+        layout["left"].split_column(
+            Layout(name="status", ratio=2),
+            Layout(name="performance", ratio=1)
+        )
+        
+        # Header
+        title = Text("KALEIDOSCAPE", style="bold magenta")
+        subtitle = Text("Service Monitoring & Debugging Console", style="dim")
+        layout["header"].update(
+            Panel(
+                Align.center(title + "\n" + subtitle),
+                border_style="magenta"
+            )
+        )
+        
+        # Status table (with padding to prevent overflow)
+        layout["status"].update(Panel(self._create_status_table(), border_style="cyan", padding=(0, 1)))
+        
+        # Performance panel (with padding to prevent overflow)
+        perf_content = self._create_performance_panel()
+        layout["performance"].update(Panel(perf_content, title="Performance Metrics", border_style="green", padding=(0, 1)))
+        
+        # Logs panel
+        layout["logs"].update(self._create_logs_panel())
+        
+        return layout
+    
+    def _cmd_set_status(self, status: str):
+        """Set mode status"""
+        if not self.mode or not hasattr(self.mode, 'set_status'):
+            self.log("UI", "ERROR", "Mode does not support set_status")
+            return
+        
+        if status in ['eye', 'people']:
+            self.mode.set_status(status)
+            self.log("UI", "INFO", f"Status set to: {status}")
+        else:
+            self.log("UI", "ERROR", f"Invalid status: {status}. Use 'eye' or 'people'")
+    
+    def _cmd_trigger_wave(self):
+        """Trigger wave gesture"""
+        if not self.mode or not hasattr(self.mode, 'set_status'):
+            self.log("UI", "ERROR", "Mode does not support gestures")
+            return
+        
+        self.mode.set_status('wave', duration=5.0, substate='hand_waving')
+        self.log("UI", "INFO", "Wave gesture triggered")
+    
+    def _cmd_trigger_thumbs_up(self):
+        """Trigger thumbs up gesture"""
+        if not self.mode or not hasattr(self.mode, 'set_status'):
+            self.log("UI", "ERROR", "Mode does not support gestures")
+            return
+        
+        self.mode.set_status('thumbs_up', duration=3.0)
+        self.log("UI", "INFO", "Thumbs up gesture triggered")
+    
+    def _cmd_trigger_smile(self):
+        """Trigger smile gesture"""
+        if not self.mode or not hasattr(self.mode, 'set_status'):
+            self.log("UI", "ERROR", "Mode does not support gestures")
+            return
+        
+        self.mode.set_status('smile', duration=10.0)
+        self.log("UI", "INFO", "Smile gesture triggered")
+    
+    def _cmd_start_service(self, service_name: str = None):
+        """Start a service"""
+        if not service_name:
+            self.log("UI", "ERROR", "Usage: start <service_name>")
+            self.log("UI", "INFO", "Available services: camera, face, gesture, segmentation, tts, stt")
+            return
+        
+        service_name_lower = service_name.lower()
+        service_map = {
+            'camera': 'Camera',
+            'face': 'Face Detection',
+            'gesture': 'Gesture Detection',
+            'segmentation': 'People Segmentation',
+            'tts': 'Audio (TTS)',
+            'stt': 'Audio (STT)',
+        }
+        
+        mapped_name = service_map.get(service_name_lower)
+        if not mapped_name:
+            self.log("UI", "ERROR", f"Unknown service: {service_name}")
+            return
+        
+        if not self.mode:
+            self.log("UI", "ERROR", "Mode not available")
+            return
+        
+        # Enable the service
+        if mapped_name in self.services:
+            self.services[mapped_name].enabled = True
+            self.log("UI", "INFO", f"Service '{mapped_name}' enabled")
+        
+        # Actually start/restart the service based on type
+        if service_name_lower == 'camera' and hasattr(self.mode, 'camera_running'):
+            if not self.mode.camera_running:
+                # Restart camera thread if camera exists
+                if hasattr(self.mode, 'camera') and self.mode.camera:
+                    self.mode.camera_running = True
+                    if hasattr(self.mode, '_camera_loop'):
+                        import threading
+                        self.mode.camera_thread = threading.Thread(target=self.mode._camera_loop, daemon=True)
+                        self.mode.camera_thread.start()
+                    self.log("UI", "INFO", "Camera started")
+            else:
+                self.log("UI", "INFO", "Camera already running")
+        
+        elif service_name_lower == 'stt' and hasattr(self.mode, 'audio_service'):
+            if self.mode.audio_service:
+                if not self.mode.audio_service.stt_enabled:
+                    self.mode.audio_service.initialize_stt()
+                    self.log("UI", "INFO", "Speech-to-text started")
+                else:
+                    self.log("UI", "INFO", "Speech-to-text already running")
+        
+        elif service_name_lower in ['face', 'gesture', 'segmentation']:
+            # These are controlled by enable flag, which is already set above
+            self.log("UI", "INFO", f"Service '{mapped_name}' will be enabled on next camera frame")
+    
+    def _cmd_stop_service(self, service_name: str = None):
+        """Stop a service"""
+        if not service_name:
+            self.log("UI", "ERROR", "Usage: stop <service_name>")
+            return
+        
+        service_name_lower = service_name.lower()
+        service_map = {
+            'camera': 'Camera',
+            'face': 'Face Detection',
+            'gesture': 'Gesture Detection',
+            'segmentation': 'People Segmentation',
+            'tts': 'Audio (TTS)',
+            'stt': 'Audio (STT)',
+        }
+        
+        mapped_name = service_map.get(service_name_lower)
+        if not mapped_name:
+            self.log("UI", "ERROR", f"Unknown service: {service_name}")
+            return
+        
+        # Disable the service
+        if mapped_name in self.services:
+            self.services[mapped_name].enabled = False
+            self.log("UI", "INFO", f"Service '{mapped_name}' disabled")
+        
+        # Actually stop the service
+        if service_name_lower == 'camera' and hasattr(self.mode, 'camera_running'):
+            self.mode.camera_running = False
+            self.log("UI", "INFO", "Camera stopped")
+        
+        elif service_name_lower == 'stt' and hasattr(self.mode, 'audio_service'):
+            if self.mode.audio_service and hasattr(self.mode.audio_service, 'speech_to_text'):
+                if self.mode.audio_service.speech_to_text:
+                    self.mode.audio_service.speech_to_text.stop_listening()
+                    self.log("UI", "INFO", "Speech-to-text stopped")
+    
+    def _cmd_enable_service(self, service_name: str = None):
+        """Enable a service (alias for start)"""
+        self._cmd_start_service(service_name)
+    
+    def _cmd_disable_service(self, service_name: str = None):
+        """Disable a service (alias for stop)"""
+        self._cmd_stop_service(service_name)
+    
+    def _cmd_help(self):
+        """Show help"""
+        help_text = """
+Available Commands:
+
+Mode Control:
+  status <eye|people>      - Set mode status (eye or people)
+  eye                     - Shortcut for 'status eye'
+  people                  - Shortcut for 'status people'
+  wave                    - Trigger wave gesture
+  thumbs_up               - Trigger thumbs up gesture
+  smile                   - Trigger smile gesture
+
+Service Control:
+  start <service>         - Start/Enable a service
+  stop <service>          - Stop/Disable a service
+  enable <service>        - Alias for 'start <service>'
+  disable <service>       - Alias for 'stop <service>'
+
+Available Services:
+  camera                  - Camera capture
+  face                    - Face detection
+  gesture                 - Gesture detection
+  segmentation            - People segmentation
+  tts                     - Text-to-speech (TTS)
+  stt                     - Speech-to-text (STT)
+
+Examples:
+  start camera            - Start camera service
+  stop face               - Stop face detection
+  enable gesture          - Enable gesture detection
+  disable segmentation    - Disable people segmentation
+
+Other:
+  help                    - Show this help
+  quit / exit             - Exit console
+"""
+        self.log("UI", "INFO", help_text)
+    
+    def _process_command(self, command: str):
+        """Process a command"""
+        parts = command.strip().split()
+        if not parts:
+            return
+        
+        cmd = parts[0].lower()
+        args = parts[1:] if len(parts) > 1 else []
+        
+        if cmd == 'quit' or cmd == 'exit':
+            self.running = False
+            return
+        
+        if cmd in self.command_handlers:
+            try:
+                if args:
+                    self.command_handlers[cmd](*args)
+                else:
+                    self.command_handlers[cmd]()
+            except Exception as e:
+                self.log("UI", "ERROR", f"Command error: {e}")
+        else:
+            self.log("UI", "WARNING", f"Unknown command: {cmd}. Type 'help' for available commands")
+    
+    def _update_loop(self):
+        """Update loop for the UI"""
+        while self.running:
+            try:
+                # Update service statuses from mode
+                if self.mode:
+                    self._update_mode_status()
+                
+                # Update performance metrics
+                if self.client and self.client.current_mode:
+                    frame_start = time.time()
+                    # Track overall display FPS
+                    self.track_performance('LED Display')
+                
+                # Update system monitoring
+                self.system_monitor.update()
+                
+                time.sleep(0.1)  # Update UI 10 times per second
+            except Exception as e:
+                self.log("UI", "ERROR", f"Update error: {e}")
+    
+    def _update_mode_status(self):
+        """Update status from mode"""
+        if not self.mode:
+            return
+        
+        # Update camera status
+        camera_enabled = self.services.get('Camera', ServiceStatus(name='Camera')).enabled
+        if hasattr(self.mode, 'camera') and self.mode.camera and camera_enabled:
+            if hasattr(self.mode, 'camera_running') and self.mode.camera_running:
+                self.update_service_status('Camera', 'Running', 'Active')
+                self.track_performance('Camera')
+            else:
+                self.update_service_status('Camera', 'Stopped', 'Disabled')
+        else:
+            status = 'Disabled' if not camera_enabled else 'Not initialized'
+            self.update_service_status('Camera', 'Stopped', status)
+        
+        # Update face detection
+        face_enabled = self.services.get('Face Detection', ServiceStatus(name='Face Detection')).enabled
+        if hasattr(self.mode, 'face_detector_module') and self.mode.face_detector_module and face_enabled:
+            self.update_service_status('Face Detection', 'Running', 'Active')
+            self.track_performance('Face Detection')
+        else:
+            status = 'Disabled' if not face_enabled else 'Not initialized'
+            self.update_service_status('Face Detection', 'Stopped', status)
+        
+        # Update gesture detection
+        gesture_enabled = self.services.get('Gesture Detection', ServiceStatus(name='Gesture Detection')).enabled
+        if hasattr(self.mode, 'gesture_detector_module') and self.mode.gesture_detector_module and gesture_enabled:
+            status = 'Running'
+            details = 'AI + Manual'
+            if hasattr(self.mode.gesture_detector_module, 'gesture_recognizer_available'):
+                if not self.mode.gesture_detector_module.gesture_recognizer_available:
+                    details = 'Manual only'
+            self.update_service_status('Gesture Detection', status, details)
+            self.track_performance('Gesture Detection')
+        else:
+            status_text = 'Disabled' if not gesture_enabled else 'Not initialized'
+            self.update_service_status('Gesture Detection', 'Stopped', status_text)
+        
+        # Update people segmentation
+        segmentation_enabled = self.services.get('People Segmentation', ServiceStatus(name='People Segmentation')).enabled
+        if hasattr(self.mode, 'mask_detector_module') and self.mode.mask_detector_module and segmentation_enabled:
+            self.update_service_status('People Segmentation', 'Running', 'Active')
+            self.track_performance('People Segmentation')
+        else:
+            status = 'Disabled' if not segmentation_enabled else 'Not initialized'
+            self.update_service_status('People Segmentation', 'Stopped', status)
+        
+        # Update video manager
+        if hasattr(self.mode, 'video_manager') and self.mode.video_manager:
+            video_count = len(self.mode.video_config) if hasattr(self.mode, 'video_config') else 0
+            self.update_service_status('Video Manager', 'Running', f'{video_count} videos loaded')
+        else:
+            self.update_service_status('Video Manager', 'Stopped', 'Not initialized')
+        
+        # Update audio services
+        if hasattr(self.mode, 'audio_service') and self.mode.audio_service:
+            self.update_service_status('Audio (TTS)', 'Running', 'Piper TTS')
+            self.update_service_status('Audio (STT)', 'Running', 'Whisper STT')
+        else:
+            self.update_service_status('Audio (TTS)', 'Stopped', 'Not initialized')
+            self.update_service_status('Audio (STT)', 'Stopped', 'Not initialized')
+    
+    def run(self):
+        """Run the console UI"""
+        if not RICH_AVAILABLE:
+            self.console.print("[red]Error: rich library not available[/red]")
+            return
+        
+        self.running = True
+        
+        # Show initial message BEFORE enabling print interception
+        try:
+            self.console.print("\n[bold cyan]Kaleidoscape Console[/bold cyan] - Starting dashboard...\n")
+            sys.stdout.flush()  # Force flush
+        except Exception as e:
+            # Fallback if Rich console fails
+            print(f"\nKaleidoscape Console - Starting dashboard... (Rich error: {e})\n")
+            sys.stdout.flush()
+        
+        # Debug: Show we're starting update thread
+        try:
+            self.console.print("[dim]Starting update thread...[/dim]")
+            sys.stdout.flush()
+        except Exception:
+            print("Starting update thread...")
+            sys.stdout.flush()
+        
+        # Start update thread
+        self.update_thread = threading.Thread(target=self._update_loop, daemon=True)
+        self.update_thread.start()
+        
+        # Debug: Show thread started
+        try:
+            self.console.print("[dim]Update thread started[/dim]")
+            sys.stdout.flush()
+        except Exception:
+            print("Update thread started")
+            sys.stdout.flush()
+        
+        # Small delay to ensure thread starts
+        time.sleep(0.2)
+        
+        # Skip print interception for now - it's causing blocking issues
+        # We'll enable it later if needed, or make it optional
+        # The issue is that redirecting stdout/stderr conflicts with Rich's console
+        # self.print_interceptor.enable()
+        
+        # Debug: Skipping print interception
+        try:
+            self.console.print("[dim]Skipping print interception (using Rich console directly)[/dim]")
+            sys.stdout.flush()
+        except Exception:
+            print("Skipping print interception")
+            sys.stdout.flush()
+        
+        # Initial log (will be shown in logs panel)
+        try:
+            self.log("UI", "INFO", "Kaleidoscape console started")
+        except Exception as e:
+            # Don't fail if logging doesn't work yet
+            try:
+                print(f"Logging failed: {e}")
+            except Exception:
+                pass
+        
+        # Main UI loop - Live widget with separate input thread
+        try:
+            # Show that we're entering the main loop
+            try:
+                self.console.print("[dim]Entering dashboard loop...[/dim]")
+            except Exception:
+                pass
+            
+            # Input queue for thread-safe command passing
+            input_queue = queue.Queue()
+            
+            # Input thread - reads input character by character to show in UI
+            def input_thread():
+                """Background thread for reading user input character by character"""
+                import select
+                import termios
+                import tty
+                
+                # Set terminal to raw mode for character-by-character input
+                old_settings = None
+                try:
+                    if sys.stdin.isatty():
+                        old_settings = termios.tcgetattr(sys.stdin)
+                        tty.setraw(sys.stdin.fileno())
+                except Exception:
+                    # Fall back to line mode if raw mode fails
+                    old_settings = None
+                
+                try:
+                    while self.running:
+                        try:
+                            if old_settings is not None:
+                                # Raw mode - read character by character
+                                if select.select([sys.stdin], [], [], 0.1)[0]:
+                                    char = sys.stdin.read(1)
+                                    char_code = ord(char) if char else 0
+                                    
+                                    if char == '\n' or char == '\r':
+                                        # Enter pressed - process command
+                                        with self.input_lock:
+                                            command = self.current_input.strip()
+                                            self.current_input = ""
+                                        
+                                        if command:
+                                            input_queue.put(command)
+                                    elif char_code == 3:  # Ctrl+C
+                                        self.running = False
+                                        break
+                                    elif char_code == 127 or char_code == 8:  # Backspace
+                                        with self.input_lock:
+                                            if self.current_input:
+                                                self.current_input = self.current_input[:-1]
+                                    elif char_code >= 32:  # Printable character
+                                        with self.input_lock:
+                                            self.current_input += char
+                            else:
+                                # Fall back to line mode
+                                try:
+                                    command = input()
+                                    if command and command.strip():
+                                        input_queue.put(command.strip())
+                                except (EOFError, KeyboardInterrupt):
+                                    self.running = False
+                                    break
+                        except Exception:
+                            time.sleep(0.1)
+                finally:
+                    # Restore terminal settings
+                    if old_settings is not None:
+                        try:
+                            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                        except Exception:
+                            pass
+            
+            # Start input thread
+            input_thread_obj = threading.Thread(target=input_thread, daemon=True)
+            input_thread_obj.start()
+            
+            # Create initial layout
+            try:
+                initial_layout = self._create_layout()
+            except Exception as layout_error:
+                self.console.print(f"[red]Layout error: {layout_error}[/red]")
+                return
+            
+            # Main Live widget loop - updates dashboard continuously
+            with Live(initial_layout, refresh_per_second=2, screen=False, transient=False) as live:
+                while self.running:
+                    try:
+                        # Update the layout
+                        live.update(self._create_layout())
+                        
+                        # Check for commands from input thread (non-blocking)
+                        try:
+                            command = input_queue.get_nowait()
+                            if command:
+                                self._process_command(command)
+                        except queue.Empty:
+                            pass
+                        
+                        time.sleep(0.5)  # Update every 0.5 seconds
+                    except KeyboardInterrupt:
+                        self.running = False
+                        break
+                    except Exception as e:
+                        # Log errors but don't let them break the UI
+                        try:
+                            self.log("UI", "ERROR", f"Update error: {e}")
+                        except Exception:
+                            pass  # Even logging can fail, don't break
+                        time.sleep(0.5)
+        except Exception as e:
+            # Log error but don't print to console (would interfere)
+            try:
+                self.log("UI", "ERROR", f"Console UI error: {e}")
+            except Exception:
+                pass
+            # Fallback mode - simple input loop
+            while self.running:
+                try:
+                    command = input("\nKaleidoscape> ")
+                    if command:
+                        self._process_command(command)
+                except (EOFError, KeyboardInterrupt):
+                    self.running = False
+                    break
+        finally:
+            # Ensure print interceptor is disabled (if it was enabled)
+            if hasattr(self, 'print_interceptor') and self.print_interceptor.enabled:
+                try:
+                    self.print_interceptor.disable()
+                except Exception:
+                    pass
+            
+            try:
+                self.log("UI", "INFO", "Kaleidoscape console stopped")
+            except Exception:
+                pass
+

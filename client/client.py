@@ -492,11 +492,19 @@ class Client:
         """Text functionality removed for music visualizer"""
         pass
 
-def start(args, client):
+def start(args, client, console_ui=None):
     """Main update loop"""
+    import time
+    
     def update():
+        frame_start = time.time()
         client.update_display()
         client.leds.show()
+        frame_time = time.time() - frame_start
+        
+        # Track performance in console UI
+        if console_ui:
+            console_ui.track_performance('LED Display', frame_time)
     
     # Check if we're using simulation mode
     if hasattr(client.leds, 'start_event_loop'):
@@ -519,6 +527,8 @@ if __name__ == '__main__':
         parser.add_argument('--simulate', type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument('--server', type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument('--test', type=bool, action=argparse.BooleanOptionalAction, default=False)
+        parser.add_argument('--console', type=bool, action=argparse.BooleanOptionalAction, default=False,
+                            help='Enable Kaleidoscape console UI for monitoring and debugging')
         args = parser.parse_args()
         
         server = args.server
@@ -573,10 +583,39 @@ if __name__ == '__main__':
         if mode_name == 'decompression' and hasattr(mode, 'set_status'):
             mode.set_status('people')
 
-        # Start the main loop
-        # In simulation mode, this will block in the Qt event loop
-        # In hardware mode, this will run an infinite loop
-        start(args, client)
+        # Start console UI if requested (after initialization)
+        console_ui = None
+        if args.console:
+            try:
+                from console_ui import KaleidoscapeUI
+                console_ui = KaleidoscapeUI(client, mode)
+                print("Kaleidoscape console UI initialized")
+                
+                # Start display loop in background thread
+                display_thread = threading.Thread(target=lambda: start(args, client, console_ui), daemon=True)
+                display_thread.start()
+                
+                # Store console UI reference in mode for service control
+                if hasattr(mode, '_console_ui_ref'):
+                    mode._console_ui_ref = console_ui
+                
+                # Run console UI in main thread (blocks here)
+                print("Starting Kaleidoscape console...")
+                console_ui.run()
+            except ImportError as e:
+                print(f"Warning: Could not start console UI: {e}")
+                print("Install rich library: pip install rich")
+                # Fall back to normal mode
+                start(args, client, None)
+            except Exception as e:
+                print(f"Warning: Console UI error: {e}")
+                import traceback
+                traceback.print_exc()
+                # Fall back to normal mode
+                start(args, client, None)
+        else:
+            # Normal mode - run display loop in main thread
+            start(args, client, console_ui)
 
     except KeyboardInterrupt:
         print("Exiting LED client")

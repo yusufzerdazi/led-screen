@@ -55,15 +55,38 @@ if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]] || [[ "$MODE" == "hydra_m
     cd "$SCRIPT_DIR"
     
     echo "Starting $MODE mode..."
-    # For hydra_mask mode, run in foreground to allow stdin input
-    if [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]]; then
+    # Check if console mode is enabled
+    CONSOLE_MODE=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--console" ]]; then
+            CONSOLE_MODE=true
+            break
+        fi
+    done
+    
+    # Run in foreground for console mode or hydra_mask/mask modes (to allow stdin input)
+    if [[ "$CONSOLE_MODE" == true ]] || [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]]; then
         python3 client.py "$@"
     else
         python3 client.py "$@" &
     fi
 else
     echo "Starting $MODE mode (Hydra not needed)..."
-    python3 client.py "$@" &
+    # Check if console mode is enabled
+    CONSOLE_MODE=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--console" ]]; then
+            CONSOLE_MODE=true
+            break
+        fi
+    done
+    
+    # Run in foreground for console mode (to allow stdin input)
+    if [[ "$CONSOLE_MODE" == true ]]; then
+        python3 client.py "$@"
+    else
+        python3 client.py "$@" &
+    fi
 fi
 
 # Wait a moment to ensure services are running
