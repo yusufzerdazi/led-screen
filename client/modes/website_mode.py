@@ -107,12 +107,15 @@ class WebsiteMode(BaseMode):
                 image_data = self.driver.get_screenshot_as_base64()
                 frame = Image.open(BytesIO(base64.b64decode(image_data)))
                 
-                # Update cached frame
-                with self._frame_lock:
-                    self._cached_frame = frame
+                # Update cached frame (only if successful)
+                if frame is not None:
+                    with self._frame_lock:
+                        self._cached_frame = frame
                     
             except Exception as e:
                 print(f"Error capturing screenshot: {e}")
+                # Keep previous frame if available - don't overwrite with None
+                # This prevents flickering/black screens when screenshot fails temporarily
             
             # Rate limit screenshot capture
             time.sleep(self.screenshot_interval)

@@ -17,6 +17,8 @@ imageio
 imageio-ffmpeg
 piper-tts
 sounddevice
+SpeechRecognition
+openai-whisper
 
 # Hardware-specific dependencies (not needed for simulation mode):
 # 

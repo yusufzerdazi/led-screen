@@ -10,6 +10,7 @@ from .tush_mode import TushMode
 from .dashboard_mode import DashboardMode
 from .decompression_mode import DecompressionMode
 from .hydra_mask_mode import HydraMaskMode
+from .light_test_mode import LightTestMode
 
 # Mode registry - maps mode names to mode classes
 MODE_REGISTRY = {
@@ -20,6 +21,7 @@ MODE_REGISTRY = {
     'decompression': DecompressionMode,
     'hydra_mask': HydraMaskMode,
     'mask': HydraMaskMode,  # Alias
+    'light_test': LightTestMode,
 }
 
 def get_mode(mode_name, width=256, height=144):

@@ -58,6 +58,14 @@ except ImportError as e:
 import simulation
 import mqtt
 
+# Speech-to-text import (optional)
+try:
+    from speech_to_text import SpeechToText
+    STT_AVAILABLE = True
+except ImportError:
+    STT_AVAILABLE = False
+    print("Speech-to-text not available - install SpeechRecognition and openai-whisper")
+
 DEFAULT_TARGET_FPS = 24.0
 
 lock = threading.RLock()
@@ -113,6 +121,10 @@ class Client:
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
         
+        # Speech-to-text (optional, can be enabled per mode)
+        self.speech_to_text = None
+        self.stt_enabled = False
+        
         # Check if simulation mode
         self.is_simulation = isinstance(leds, simulation.Leds)
         if self.is_simulation:
@@ -137,6 +149,7 @@ class Client:
         
         # Audio capture handled by current mode if needed
         
+        # Speech-to-text can be enabled by modes if needed
         # No AI greeting - using stock visuals
 
     
@@ -407,6 +420,45 @@ class Client:
         """Thread removed for music visualizer"""
         pass
 
+    def enable_speech_to_text(self, model_size="base", on_text_callback=None):
+        """Enable speech-to-text listening
+        
+        Args:
+            model_size: Whisper model size ("tiny", "base", "small", "medium", "large")
+            on_text_callback: Optional callback function(text) called when text is transcribed
+        """
+        if not STT_AVAILABLE:
+            print("Speech-to-text not available")
+            return False
+        
+        if self.speech_to_text:
+            print("Speech-to-text already enabled")
+            return True
+        
+        try:
+            self.speech_to_text = SpeechToText(model_size=model_size, use_whisper=True)
+            
+            # Default callback: just log the text
+            def default_callback(text):
+                print(f"[STT] Transcribed speech: {text}")
+            
+            callback = on_text_callback if on_text_callback else default_callback
+            self.speech_to_text.start_listening(on_text_callback=callback)
+            self.stt_enabled = True
+            print("Speech-to-text enabled and listening")
+            return True
+        except Exception as e:
+            print(f"Error enabling speech-to-text: {e}")
+            return False
+    
+    def disable_speech_to_text(self):
+        """Disable speech-to-text listening"""
+        if self.speech_to_text:
+            self.speech_to_text.stop_listening()
+            self.speech_to_text = None
+            self.stt_enabled = False
+            print("Speech-to-text disabled")
+
     def cleanup(self):
         """Stop monitoring thread and cleanup"""
         self.monitoring_active = False
@@ -414,6 +466,9 @@ class Client:
         # Clean up current mode
         if self.current_mode:
             self.current_mode.cleanup()
+        
+        # Stop speech-to-text
+        self.disable_speech_to_text()
         
         # Stop audio capture (legacy cleanup for non-refactored code)
         # Audio cleanup handled by current mode if needed
@@ -464,7 +519,6 @@ if __name__ == '__main__':
         parser.add_argument('--simulate', type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument('--server', type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument('--test', type=bool, action=argparse.BooleanOptionalAction, default=False)
-    
         args = parser.parse_args()
         
         server = args.server
@@ -476,7 +530,7 @@ if __name__ == '__main__':
             leds = simulation.Leds(40, 30)
         else:
             if WS2812_AVAILABLE:
-                leds = ws2812.Leds(40, 30, 0.1)  # 10% brightness (matching main branch)
+                leds = ws2812.Leds(40, 30, 0.5)  # 10% brightness (matching main branch)
             else:
                 print("WARNING: ws2812 hardware not available, falling back to simulation mode")
                 print("To use real hardware, ensure you're on a Raspberry Pi with required dependencies")
