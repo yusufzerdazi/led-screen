@@ -45,17 +45,7 @@ done
 
 # Start Hydra for modes that need it (tush/music/hydra_mask/mask/decompression)
 if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]] || [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]] || [[ "$MODE" == "decompression" ]]; then
-    echo "Starting local Hydra instance for $MODE mode..."
-    cd "$SCRIPT_DIR/../../hydra" && npm run dev &
-    
-    # Wait for Hydra to start up
-    sleep 5
-    
-    # Return to script directory
-    cd "$SCRIPT_DIR"
-    
-    echo "Starting $MODE mode..."
-    # Check if console mode is enabled
+    # Check if console mode is enabled (need to check before starting Hydra)
     CONSOLE_MODE=false
     for arg in "$@"; do
         if [[ "$arg" == "--console" ]]; then
@@ -64,9 +54,31 @@ if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]] || [[ "$MODE" == "hydra_m
         fi
     done
     
+    echo "Starting local Hydra instance for $MODE mode..."
+    # Redirect Hydra output to log file when in console mode to avoid interfering with Rich
+    if [[ "$CONSOLE_MODE" == true ]]; then
+        cd "$SCRIPT_DIR/../../hydra" && npm run dev > "$SCRIPT_DIR/hydra.log" 2>&1 &
+    else
+        cd "$SCRIPT_DIR/../../hydra" && npm run dev &
+    fi
+    
+    # Wait for Hydra to start up
+    sleep 5
+    
+    # Return to script directory
+    cd "$SCRIPT_DIR"
+    
+    echo "Starting $MODE mode..."
+    
     # Run in foreground for console mode or hydra_mask/mask modes (to allow stdin input)
     if [[ "$CONSOLE_MODE" == true ]] || [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]]; then
+        # Clear screen before starting Rich console to ensure clean terminal state
+        if [[ "$CONSOLE_MODE" == true ]]; then
+            clear
+        fi
         python3 client.py "$@"
+        # After console mode exits, cleanup background services (e.g., Hydra)
+        cleanup
     else
         python3 client.py "$@" &
     fi
@@ -84,6 +96,7 @@ else
     # Run in foreground for console mode (to allow stdin input)
     if [[ "$CONSOLE_MODE" == true ]]; then
         python3 client.py "$@"
+        cleanup
     else
         python3 client.py "$@" &
     fi

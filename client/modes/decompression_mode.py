@@ -17,10 +17,12 @@ if _parent_dir not in sys.path:
     sys.path.insert(0, _parent_dir)
 from detectors import GestureDetector, FaceDetector, MaskDetector
 from services import VideoManager, AudioService
+from text_scroller import TextScroller
 from PIL import Image, ImageDraw, ImageFont
 import time
 import numpy as np
 from threading import Thread, Lock
+from queue import Queue, Empty
 import os
 try:
     # Try to set CPU affinity for better performance on multi-core systems
@@ -109,13 +111,26 @@ class DecompressionMode(WebsiteMode):
         self.mask_detector_module: MaskDetector = None
         self.video_manager: VideoManager = None
         
+        # Console UI reference for service control (set by client.py)
+        self._console_ui_ref = None
+        
+        # Background gesture detection queue and thread
+        self.gesture_queue = Queue(maxsize=1)  # Single frame queue - always process latest frame only
+        self.gesture_thread = None
+        self.gesture_thread_running = False
+        
         # Video configuration
         self.videos_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'videos')
         self.video_config = {
-            'hand_waving': 'hand_wave.mp4',
-            'thumbs_up': 'thumbs_up.mp4',
-            'smile': 'smile.mp4',
+            'hand_waving': {'filename': 'hand_wave.mp4', 'max_frames': 154},
+            'thumbs_up': {'filename': 'thumbs_up.mp4'},
+            'smile': {'filename': 'smile.mp4'},
         }
+        # Store max_frames per video for frame limiting
+        self.video_max_frames = {}
+        for action_name, config in self.video_config.items():
+            if isinstance(config, dict) and 'max_frames' in config:
+                self.video_max_frames[action_name] = config['max_frames']
         
         # State management system
         self.current_status = 'eye'  # Current status: 'eye', 'people', 'wave', 'thumbs_up', 'smile'
@@ -206,7 +221,9 @@ class DecompressionMode(WebsiteMode):
         
         self.font_path = font_path
         self.font_size = 20  # Base font size for rendering (will be scaled down)
-        self._font_cache = None  # Cache the loaded font
+        
+        # Initialize text scroller
+        self.text_scroller = TextScroller(self.width, self.height, self.font_path, self.font_size)
         
         # Audio service (initialized in init())
         self.audio_service: AudioService = None
@@ -411,6 +428,12 @@ class DecompressionMode(WebsiteMode):
             )
             self.gesture_detector_module.initialize_ai_model(model_path)
             print("Gesture detector initialized")
+            
+            # Start background gesture detection thread
+            self.gesture_thread_running = True
+            self.gesture_thread = Thread(target=self._gesture_detection_loop, daemon=True)
+            self.gesture_thread.start()
+            print("Gesture detection thread started")
         except Exception as e:
             print(f"Warning: Could not initialize gesture detector: {e}")
             self.gesture_detector_module = None
@@ -439,9 +462,25 @@ class DecompressionMode(WebsiteMode):
         
         # Initialize video manager
         try:
+            print("Initializing video manager...")
             self.video_manager = VideoManager(self.videos_dir)
-            self.video_manager.load_videos(self.video_config)
-            print("Video manager initialized")
+            # Extract filenames and max_frames from config (support both string and dict formats)
+            video_filenames = {}
+            max_frames_config = {}
+            for action_name, config in self.video_config.items():
+                if isinstance(config, dict):
+                    video_filenames[action_name] = config['filename']
+                    # Print max_frames if configured
+                    if 'max_frames' in config:
+                        max_frames_config[action_name] = config['max_frames']
+                        print(f"  Video '{action_name}': {config['filename']} (max_frames: {config['max_frames']})")
+                    else:
+                        print(f"  Video '{action_name}': {config['filename']}")
+                else:
+                    video_filenames[action_name] = config
+                    print(f"  Video '{action_name}': {config}")
+            self.video_manager.load_videos(video_filenames, max_frames_config=max_frames_config)
+            print("✓ Video manager initialized")
         except Exception as e:
             print(f"Warning: Could not initialize video manager: {e}")
             self.video_manager = None
@@ -506,7 +545,7 @@ class DecompressionMode(WebsiteMode):
         detection_intervals = {
             'face': 0.1,      # Detect faces every 100ms (~10fps)
             'people': 0.033,  # Detect people every 33ms (~30fps) - smooth updates
-            'gesture': 0.05,  # Detect gestures every 50ms (~20fps) - needs to be responsive
+            'gesture': 0.2,   # Detect gestures every 200ms (~5fps) - reduced frequency to save resources
             'smile': 0.1,     # Detect smiles every 100ms (~10fps)
         }
         frame_timestamp_ms = 0  # For face landmarker video mode
@@ -514,6 +553,10 @@ class DecompressionMode(WebsiteMode):
         # Downscale factor for faster processing (Mediapipe works well with smaller images)
         process_width = 320  # Process at 320px width instead of full resolution
         process_height = None  # Will calculate to maintain aspect ratio
+        
+        # Even smaller frame for gesture detection (further reduces processing time)
+        gesture_process_width = 160  # Process gestures at 160px width (4x smaller = much faster)
+        gesture_process_height = None  # Will calculate to maintain aspect ratio
         
         while self.camera_running and self.camera:
             try:
@@ -553,30 +596,34 @@ class DecompressionMode(WebsiteMode):
                 
                 # Check service enable flags (from console UI if available)
                 # Get enabled status from console UI if it exists
+                # Default to enabled, but always check console UI if available
+                # This ensures console UI control is respected
                 face_enabled = True
                 gesture_enabled = True
                 segmentation_enabled = True
-                smile_enabled = True
                 
-                # Check if console UI has service control flags
+                # Check if console UI has service control flags - ALWAYS check if available
+                # Console UI is the source of truth for service enabled/disabled state
                 if hasattr(self, '_console_ui_ref') and self._console_ui_ref:
                     console_ui = self._console_ui_ref
-                    if hasattr(console_ui, 'services'):
-                        # Get enabled status, defaulting to True if service not found
+                    if hasattr(console_ui, 'services') and console_ui.services:
+                        # Get enabled status from console UI - this is the source of truth
+                        # Always use the value from console UI, don't default
                         face_service = console_ui.services.get('Face Detection')
-                        if face_service:
+                        if face_service is not None:
                             face_enabled = face_service.enabled
+                            # face_enabled is now set from console UI
                         
                         gesture_service = console_ui.services.get('Gesture Detection')
-                        if gesture_service:
+                        if gesture_service is not None:
                             gesture_enabled = gesture_service.enabled
                         
                         segmentation_service = console_ui.services.get('People Segmentation')
-                        if segmentation_service:
+                        if segmentation_service is not None:
                             segmentation_enabled = segmentation_service.enabled
-                        
-                        # Smile uses face detector, so use face_enabled
-                        smile_enabled = face_enabled
+                
+                # Smile uses face detector, so use face_enabled
+                smile_enabled = face_enabled
                 
                 # Detect faces (only if enabled, in eye status, and throttle)
                 if (face_enabled and self.face_detector_module and
@@ -592,15 +639,35 @@ class DecompressionMode(WebsiteMode):
                     self.mask_detector_module.detect(frame_small)
                     last_detection_time['people'] = current_time
                 
-                # Detect hands for gestures (only if enabled, not already in a gesture status, and throttle)
+                # Queue frame for background gesture detection (non-blocking)
+                # This prevents gesture detection from blocking the camera loop
                 if (gesture_enabled and self.gesture_detector_module and
                     current_status not in ['wave', 'thumbs_up', 'smile']):
                     if (current_time - last_detection_time.get('gesture', 0) >= detection_intervals['gesture']):
-                        # Use AI gesture recognizer
-                        self.gesture_detector_module.detect_ai(frame_small)
-                        # Also run manual detection in parallel
-                        self.gesture_detector_module.detect_wave(frame_small)
-                        self.gesture_detector_module.detect_thumbs_up(frame_small)
+                        # Downscale frame further for gesture detection (much faster processing)
+                        if gesture_process_height is None:
+                            gesture_process_height = int(original_height * gesture_process_width / original_width)
+                        
+                        if original_width > gesture_process_width:
+                            frame_tiny = cv2.resize(frame_small, (gesture_process_width, gesture_process_height), 
+                                                   interpolation=cv2.INTER_LINEAR)
+                        else:
+                            frame_tiny = frame_small
+                        
+                        # Queue frame for background processing (non-blocking)
+                        # Use put_nowait with maxsize=1 to always keep only the latest frame
+                        # This avoids expensive frame copying and memory overhead
+                        try:
+                            # Try to get and discard old frame if queue is full (keep only latest)
+                            try:
+                                self.gesture_queue.get_nowait()
+                            except Empty:
+                                pass
+                            # Add new frame (non-blocking) - use tiny frame for faster processing
+                            self.gesture_queue.put_nowait(frame_tiny)
+                        except:
+                            # Queue full - skip this frame (shouldn't happen with maxsize=1 and get_nowait)
+                            pass
                         last_detection_time['gesture'] = current_time
                 
                 # Detect smiles (only if enabled, not already in a gesture status, and throttle)
@@ -618,9 +685,65 @@ class DecompressionMode(WebsiteMode):
                 print(f"Camera error: {e}")
                 break
     
+    def _gesture_detection_loop(self):
+        """Background thread for gesture detection - runs independently to avoid blocking camera loop"""
+        import time
+        
+        while self.gesture_thread_running and self.gesture_detector_module:
+            try:
+                # Get frame from queue (blocking with timeout to allow checking thread_running)
+                try:
+                    frame = self.gesture_queue.get(timeout=0.1)
+                except Empty:
+                    continue
+                
+                # Check if gesture detection is still enabled
+                gesture_enabled = True
+                if hasattr(self, '_console_ui_ref') and self._console_ui_ref:
+                    console_ui = self._console_ui_ref
+                    if hasattr(console_ui, 'services') and console_ui.services:
+                        gesture_service = console_ui.services.get('Gesture Detection')
+                        if gesture_service is not None:
+                            gesture_enabled = gesture_service.enabled
+                
+                # Only process if enabled
+                if gesture_enabled:
+                    # Process gesture detection (this is CPU-intensive, runs in background)
+                    # Prefer AI detection if available (more accurate), fallback to manual if needed
+                    if self.gesture_detector_module.gesture_recognizer_available:
+                        # Use AI gesture recognizer (covers both wave and thumbs up)
+                        self.gesture_detector_module.detect_ai(frame)
+                    else:
+                        # Fallback to manual detection if AI not available
+                        self.gesture_detector_module.detect_wave(frame)
+                        self.gesture_detector_module.detect_thumbs_up(frame)
+                
+                # Mark task as done
+                self.gesture_queue.task_done()
+                
+            except Exception as e:
+                print(f"Gesture detection error: {e}")
+                # Continue processing - don't break on errors
+    
     def _update_face_position(self):
         """Update target face position from face detector module."""
         if not self.face_detector_module:
+            return
+        
+        # Check if face detection is enabled via console UI
+        face_enabled = True  # Default to enabled
+        if hasattr(self, '_console_ui_ref') and self._console_ui_ref:
+            console_ui = self._console_ui_ref
+            if hasattr(console_ui, 'services'):
+                face_service = console_ui.services.get('Face Detection')
+                if face_service:
+                    face_enabled = face_service.enabled
+        
+        # If face detection is disabled, clear position and return
+        if not face_enabled:
+            with self.face_detection_lock:
+                self.target_face_position = None
+                self.detected_faces = []
             return
         
         face_pos = self.face_detector_module.get_target_position()
@@ -729,7 +852,7 @@ class DecompressionMode(WebsiteMode):
                 # Calculate scroll time based on text width
                 # Estimate: text width ~200px, scroll speed 20px/s = 10s, but we'll use 8s for safety
                 scroll_time = 8.0
-                self.status_duration = video_duration + scroll_time if video_duration > 0 else scroll_time + 2.0
+                self.status_duration = video_duration + scroll_time + 1.0 if video_duration > 0 else scroll_time + 1.0  # +1s buffer for full exit
             else:
                 self.status_duration = 10.0  # Default: 2s video placeholder + 8s text
             # Play TTS
@@ -769,8 +892,13 @@ class DecompressionMode(WebsiteMode):
                         print("Wave animation: transitioning to 'hai' text")
                     elif self.status_substate == 'hai_text':
                         # Wave animation complete, return to previous status or default to eye
-                        next_status = self.previous_status if self.previous_status else 'eye'
-                        print(f"Wave animation complete, returning to: {next_status}")
+                        # Ensure enough time for text to fully scroll off (scroll_time ~2.5s + buffer)
+                        if elapsed < 3.5:  # Give extra time for text to fully exit
+                            self.status_duration = 3.5
+                            next_status = None  # Don't transition yet
+                        else:
+                            next_status = self.previous_status if self.previous_status else 'eye'
+                            print(f"Wave animation complete, returning to: {next_status}")
                 else:
                     # Other timed statuses - return to default
                     next_status = 'eye'
@@ -802,7 +930,10 @@ class DecompressionMode(WebsiteMode):
                     if self.video_manager and self.video_manager.has_video('hand_waving'):
                         video_duration = self.video_manager.get_duration('hand_waving')
                         if video_duration > 0:
-                            duration = video_duration + 0.5 + 3.0  # +3s for hai_text phase
+                            # Calculate duration for hai_text scrolling
+                            # Estimate: "HAI" text width ~100px, scroll speed 20px/s = 5s, add buffer
+                            hai_scroll_time = 5.0 + 1.0  # Scroll time + buffer for full exit
+                            duration = video_duration + 0.5 + hai_scroll_time
                     self.set_status('wave', duration=duration, substate='hand_waving')
                     gesture_triggered = True
             
@@ -813,7 +944,7 @@ class DecompressionMode(WebsiteMode):
                     video_duration = self.video_manager.get_duration('smile')
                     if video_duration > 0:
                         scroll_time = 8.0  # Time for text to scroll
-                        duration = video_duration + scroll_time
+                        duration = video_duration + scroll_time + 1.0  # +1s buffer for full exit
                 self.set_status('smile', duration=duration)
                 self.face_detector_module.reset_smile_detected()
                 gesture_triggered = True
@@ -829,7 +960,11 @@ class DecompressionMode(WebsiteMode):
             True if video was loaded successfully, False otherwise
         """
         # Add to config
-        self.video_config[action_name] = video_filename
+        # Update video config (support both string and dict formats)
+        self.video_config[action_name] = {'filename': video_filename}
+        # Clear max_frames if it was set (new video might not need it)
+        if action_name in self.video_max_frames:
+            del self.video_max_frames[action_name]
         
         # Load via video manager
         if self.video_manager:
@@ -860,6 +995,15 @@ class DecompressionMode(WebsiteMode):
         if hydra_frame is None:
             return Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
         
+        # Limit video to max_frames if specified in config
+        if action_name in self.video_max_frames:
+            max_frames = self.video_max_frames[action_name]
+            # Get fps from video manager (accessing internal structure, but necessary for frame limit)
+            if action_name in self.video_manager._videos:
+                fps = self.video_manager._videos[action_name].get('fps', 30.0)
+                max_elapsed = max_frames / fps if fps > 0 else elapsed
+                elapsed = min(elapsed, max_elapsed)
+        
         # Get video frame from video manager
         video_frame_rgb = self.video_manager.get_frame(action_name, elapsed)
         if video_frame_rgb is None:
@@ -869,20 +1013,38 @@ class DecompressionMode(WebsiteMode):
         vid_height, vid_width = video_frame_rgb.shape[:2]
         target_width, target_height = self.width, self.height
         
-        # Calculate scaling for "fit" mode (crop edges to fit)
-        scale_x = target_width / vid_width
-        scale_y = target_height / vid_height
-        scale = max(scale_x, scale_y)
-        
-        # Resize video frame maintaining aspect ratio
-        new_width = int(vid_width * scale)
-        new_height = int(vid_height * scale)
-        video_resized = cv2.resize(video_frame_rgb, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
-        
-        # Crop to target size (center crop)
-        crop_x = (new_width - target_width) // 2
-        crop_y = (new_height - target_height) // 2
-        video_cropped = video_resized[crop_y:crop_y + target_height, crop_x:crop_x + target_width]
+        # Use "fit" mode (letterbox/pillarbox) for smile video, "fill" mode (crop) for others
+        if action_name == 'smile':
+            # Fit mode: fit entire video, add letterbox/pillarbox
+            scale_x = target_width / vid_width
+            scale_y = target_height / vid_height
+            scale = min(scale_x, scale_y)  # Use min to fit entire video (no cropping)
+            
+            # Resize video frame maintaining aspect ratio
+            new_width = int(vid_width * scale)
+            new_height = int(vid_height * scale)
+            video_resized = cv2.resize(video_frame_rgb, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+            
+            # Create black background and center the resized video (letterbox/pillarbox)
+            video_cropped = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+            offset_x = (target_width - new_width) // 2
+            offset_y = (target_height - new_height) // 2
+            video_cropped[offset_y:offset_y + new_height, offset_x:offset_x + new_width] = video_resized
+        else:
+            # Fill mode: crop edges to fill screen (original behavior)
+            scale_x = target_width / vid_width
+            scale_y = target_height / vid_height
+            scale = max(scale_x, scale_y)  # Use max to fill screen (crop edges)
+            
+            # Resize video frame maintaining aspect ratio
+            new_width = int(vid_width * scale)
+            new_height = int(vid_height * scale)
+            video_resized = cv2.resize(video_frame_rgb, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+            
+            # Crop to target size (center crop)
+            crop_x = (new_width - target_width) // 2
+            crop_y = (new_height - target_height) // 2
+            video_cropped = video_resized[crop_y:crop_y + target_height, crop_x:crop_x + target_width]
         
         # Get intensity mask from video (grayscale brightness)
         video_gray = cv2.cvtColor(video_cropped, cv2.COLOR_RGB2GRAY)
@@ -913,7 +1075,9 @@ class DecompressionMode(WebsiteMode):
         if substate == 'hand_waving':
             return self._render_waving_hand(elapsed)
         elif substate == 'hai_text':
-            return self._render_hai_text(elapsed)
+            # Use scrolling text for "hai" - elapsed is time since hai_text substate started
+            # The substate starts after the video, so elapsed is already the correct time for scrolling
+            return self._render_scrolling_text("hai", elapsed, wobble_amount=0.05)
         else:
             # Default to hand_waving if substate not set
             return self._render_waving_hand(elapsed)
@@ -945,277 +1109,24 @@ class DecompressionMode(WebsiteMode):
         else:
             # Show scrolling text after video
             text_elapsed = elapsed - video_duration
-            return self._render_scrolling_text("i see you smiling", text_elapsed)
+            return self._render_scrolling_text("i see you smiling", text_elapsed, wobble_amount=0.05)
     
-    def _render_scrolling_text(self, text: str, elapsed: float):
-        """Render scrolling text that moves across the screen.
+    def _render_scrolling_text(self, text: str, elapsed: float, wobble_amount=1.0):
+        """Render scrolling text that moves across the screen with wobbly effects.
         
         Args:
             text: Text to display
             elapsed: Elapsed time since text started (seconds)
+            wobble_amount: Amount of wobbling effect (default: 1.0)
         """
-        # Create black image
-        img = Image.new('RGB', (self.width, self.height), (0, 0, 0))
-        
-        # Get text pixel map
-        pixel_map = self._text_to_pixel_map(text, font_size_scale=1.0)
-        if not pixel_map:
-            return img
-        
-        # Calculate text width (max x coordinate)
-        max_x = max(px for px, py in pixel_map) if pixel_map else 0
-        text_width = max_x + 1
-        
-        # Scroll speed (pixels per second)
-        scroll_speed = 20.0  # Adjust for desired speed
-        
-        # Calculate scroll position
-        # Start off-screen to the right, scroll to the left
-        start_x = self.width  # Start position (off-screen right)
-        scroll_distance = text_width + self.width  # Total distance to scroll
-        scroll_time = scroll_distance / scroll_speed  # Time to complete scroll
-        
-        # Calculate current x position
-        scroll_progress = min(elapsed / scroll_time, 1.0)  # 0 to 1
-        current_x = start_x - (scroll_progress * scroll_distance)
-        
-        # Center vertically
-        center_y = self.height // 2
-        
-        # Draw pixels
-        pixels = img.load()
-        for px, py in pixel_map:
-            screen_x = int(current_x + px)
-            screen_y = int(center_y + py)
-            
-            # Only draw if within screen bounds
-            if 0 <= screen_x < self.width and 0 <= screen_y < self.height:
-                pixels[screen_x, screen_y] = (255, 255, 255)  # White text
-        
-        return img
-    
-    def _get_font(self):
-        """Get or load the TTF font"""
-        if self._font_cache is None and self.font_path:
-            try:
-                self._font_cache = ImageFont.truetype(self.font_path, self.font_size)
-            except Exception as e:
-                print(f"Warning: Could not load font {self.font_path}: {e}")
-                self._font_cache = None
-        return self._font_cache
-    
-    def _text_to_pixel_map(self, text, font_size_scale=1.0):
-        """Render text using TTF font and convert to pixel map
-        
-        Returns a list of (x, y) tuples representing pixel positions relative to text origin
-        """
-        font = self._get_font()
-        if font is None:
-            # Fallback: return empty map
-            return []
-        
-        # Render text at high resolution for better quality
-        scale_factor = 4  # Render at 4x resolution for smoother edges
-        render_size = int(self.font_size * font_size_scale * scale_factor)
-        
-        try:
-            # Create temporary font at scaled size
-            temp_font = ImageFont.truetype(self.font_path, render_size) if self.font_path else None
-            if temp_font is None:
-                return []
-            
-            # Get text bounding box to determine canvas size
-            # Use a temporary image to measure
-            temp_img = Image.new('RGB', (render_size * len(text) * 2, render_size * 2), (0, 0, 0))
-            temp_draw = ImageDraw.Draw(temp_img)
-            bbox = temp_draw.textbbox((0, 0), text, font=temp_font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            
-            # Create image for rendering
-            img_width = int(text_width + render_size)
-            img_height = int(text_height + render_size)
-            img = Image.new('RGB', (img_width, img_height), (0, 0, 0))
-            draw = ImageDraw.Draw(img)
-            
-            # Draw text in white
-            draw.text((render_size // 2, render_size // 2), text, font=temp_font, fill=(255, 255, 255))
-            
-            # Convert to numpy array and extract pixel positions
-            pixels = np.array(img)
-            # Get all white pixels (where text is)
-            text_pixels = np.where((pixels[:, :, 0] > 128) & 
-                                   (pixels[:, :, 1] > 128) & 
-                                   (pixels[:, :, 2] > 128))
-            
-            # Convert to list of (x, y) coordinates relative to text origin
-            pixel_map = []
-            for y, x in zip(text_pixels[0], text_pixels[1]):
-                # Scale down to final resolution and adjust for origin
-                final_x = (x - render_size // 2) / scale_factor
-                final_y = (y - render_size // 2) / scale_factor
-                pixel_map.append((final_x, final_y))
-            
-            return pixel_map
-            
-        except Exception as e:
-            print(f"Error rendering text to pixel map: {e}")
-            return []
-    
-    def _get_pixel_font_char(self, char):
-        """DEPRECATED: Kept for compatibility, but now uses TTF font"""
-        # This method is no longer used but kept to avoid breaking code
-        return []
-    
-    def _apply_bubbly_effect(self, px, py, elapsed, text_center_x, text_center_y):
-        """Apply bubbly/wavy distortion to pixel positions
-        
-        Args:
-            px, py: Pixel position relative to text origin
-            elapsed: Elapsed time for animation
-            text_center_x, text_center_y: Center of the text for reference
-        
-        Returns (offset_x, offset_y) for the pixel position
-        """
-        # Base wave effect - per-pixel wave based on position
-        wave_freq_x = 2.5
-        wave_freq_y = 3.0
-        wave_amp = 0.8
-        
-        # Per-pixel wave based on position
-        wave_x = math.sin(elapsed * wave_freq_x + px * 0.3) * wave_amp
-        wave_y = math.sin(elapsed * wave_freq_y + py * 0.2) * wave_amp
-        
-        # Bubbly effect - distance from text center creates rounded distortion
-        dist_from_center = math.sqrt((px - text_center_x)**2 + (py - text_center_y)**2)
-        max_dist = math.sqrt((self.width)**2 + (self.height)**2) * 0.5
-        
-        # Normalize distance (0-1)
-        norm_dist = min(dist_from_center / max_dist, 1.0) if max_dist > 0 else 0
-        
-        # Apply slight inward curve at edges (bubbly effect)
-        bubble_factor = math.sin(norm_dist * math.pi) * 0.3
-        bubble_x = math.cos(math.atan2(py - text_center_y, px - text_center_x)) * bubble_factor if dist_from_center > 0 else 0
-        bubble_y = math.sin(math.atan2(py - text_center_y, px - text_center_x)) * bubble_factor if dist_from_center > 0 else 0
-        
-        return (wave_x + bubble_x, wave_y + bubble_y)
-    
-    def _render_text_with_effects(self, text, elapsed, center_x=None, center_y=None, 
-                                   base_color=None, use_hydra_mask=True, 
-                                   wobble_amount=1.5, font_size_scale=1.0):
-        """Render text with TTF font, bubbly/wavy effects, dynamic wobbling, and hydra masking
-        
-        Args:
-            text: String to render
-            elapsed: Elapsed time for animations
-            center_x, center_y: Center position (defaults to screen center)
-            base_color: Base text color (RGB tuple, defaults to cyan)
-            use_hydra_mask: If True, mask text with hydra visual colors
-            wobble_amount: Amount of wobbling (rotation/translation)
-            font_size_scale: Scale factor for font size (1.0 = default)
-        """
-        img = Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
-        pixels = np.array(img)
-        
-        if center_x is None:
-            center_x = self.width // 2
-        if center_y is None:
-            center_y = self.height // 2
-        if base_color is None:
-            base_color = (100, 200, 255)  # Cyan
-        
-        # Update hydra frame for masking
-        if use_hydra_mask:
-            self._update_hydra_frame()
-        
-        # Get pixel map from TTF font rendering
-        pixel_map = self._text_to_pixel_map(text, font_size_scale)
-        
-        if not pixel_map:
-            # Fallback: return black image if font rendering failed
-            return img
-        
-        # Calculate text bounds to center it
-        if pixel_map:
-            min_x = min(px for px, py in pixel_map)
-            max_x = max(px for px, py in pixel_map)
-            min_y = min(py for px, py in pixel_map)
-            max_y = max(py for px, py in pixel_map)
-            text_width = max_x - min_x
-            text_height = max_y - min_y
-            text_center_x_rel = (min_x + max_x) / 2
-            text_center_y_rel = (min_y + max_y) / 2
-        else:
-            text_width = 0
-            text_height = 0
-            text_center_x_rel = 0
-            text_center_y_rel = 0
-        
-        # Dynamic wobbling - overall rotation and translation
-        wobble_rot = math.sin(elapsed * 1.2) * wobble_amount * 0.1  # Rotation in radians
-        wobble_x = math.cos(elapsed * 0.8) * wobble_amount
-        wobble_y = math.sin(elapsed * 1.0) * wobble_amount * 0.7
-        
-        # Render each pixel from the pixel map
-        for px_rel, py_rel in pixel_map:
-            # Apply bubbly/wavy effect
-            bubble_offset_x, bubble_offset_y = self._apply_bubbly_effect(
-                px_rel, py_rel, elapsed, text_center_x_rel, text_center_y_rel
-            )
-            
-            # Apply wobbling (rotation around text center)
-            wobble_cos = math.cos(wobble_rot)
-            wobble_sin = math.sin(wobble_rot)
-            
-            # Rotate around text center
-            px_rotated = (px_rel - text_center_x_rel) * wobble_cos - (py_rel - text_center_y_rel) * wobble_sin
-            py_rotated = (px_rel - text_center_x_rel) * wobble_sin + (py_rel - text_center_y_rel) * wobble_cos
-            
-            # Add bubble offset and wobble translation
-            px_final = px_rotated + text_center_x_rel + bubble_offset_x + wobble_x
-            py_final = py_rotated + text_center_y_rel + bubble_offset_y + wobble_y
-            
-            # Final pixel position (centered on screen)
-            px = int(center_x + px_final - text_center_x_rel)
-            py = int(center_y + py_final - text_center_y_rel)
-            
-            # Check bounds
-            if 0 <= px < self.width and 0 <= py < self.height:
-                # Get color - use hydra mask if enabled
-                if use_hydra_mask:
-                    # Convert pixel coordinates to normalized coordinates
-                    nx = (px - self.width / 2) / (self.width / 2)
-                    ny = (py - self.height / 2) / (self.height / 2)
-                    
-                    # Get hydra color at this position
-                    hydra_color = self._get_hydra_texture_color(nx, ny, normalize_brightness=False)
-                    
-                    if hydra_color:
-                        # Blend base color with hydra color (70% hydra, 30% base)
-                        color = tuple(np.array(hydra_color) * 0.7 + np.array(base_color) * 0.3)
-                        color = tuple(np.clip(color, 0, 255).astype(np.uint8))
-                    else:
-                        color = base_color
-                else:
-                    color = base_color
-                
-                pixels[py, px] = color
-        
-        return Image.fromarray(pixels)
-    
-    def _render_hai_text(self, elapsed):
-        """Render wavy 'hai' text with TTF font and dynamic effects"""
-        return self._render_text_with_effects(
-            text="HAI",
+        return self.text_scroller.render_scrolling_text(
+            text=text,
             elapsed=elapsed,
-            center_x=self.width // 2,
-            center_y=self.height // 2,
-            base_color=(100, 200, 255),  # Cyan
-            use_hydra_mask=True,
-            wobble_amount=1.5,
-            font_size_scale=0.8  # Slightly smaller to fit better
+            scroll_speed=20.0,
+            wobble_amount=wobble_amount,
+            font_size_scale=1.0,
+            base_color=(255, 255, 255)  # White text
         )
-    
     def _update_hydra_frame(self):
         """Update the cached frame from Hydra"""
         if self.driver:
@@ -1873,6 +1784,13 @@ class DecompressionMode(WebsiteMode):
         # Clean up detection modules
         if self.face_detector_module:
             self.face_detector_module.cleanup()
+        # Stop gesture detection thread
+        if self.gesture_thread_running:
+            self.gesture_thread_running = False
+            # Wait for thread to finish (with timeout)
+            if self.gesture_thread and self.gesture_thread.is_alive():
+                self.gesture_thread.join(timeout=1.0)
+        
         if self.gesture_detector_module:
             self.gesture_detector_module.cleanup()
         if self.mask_detector_module:

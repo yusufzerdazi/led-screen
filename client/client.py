@@ -40,8 +40,6 @@ import numpy as np
 
 # Selenium imports removed for music visualizer
 
-from text_scroller import TextScroller
-
 from ai_helper import AiHelper
 
 # Chrome/Selenium configuration removed for music visualizer
@@ -100,7 +98,6 @@ class Client:
         # Set strip delay for synchronization (adjust as needed)
         self.leds.set_strip_delay(0.001)  # 1ms delay between strips
         
-        self.text_scroller = TextScroller(self.width, self.height)
         self.display_mode = None
                 
         # Add monitoring variables
@@ -589,18 +586,16 @@ if __name__ == '__main__':
             try:
                 from console_ui import KaleidoscapeUI
                 console_ui = KaleidoscapeUI(client, mode)
-                print("Kaleidoscape console UI initialized")
                 
                 # Start display loop in background thread
                 display_thread = threading.Thread(target=lambda: start(args, client, console_ui), daemon=True)
                 display_thread.start()
                 
                 # Store console UI reference in mode for service control
-                if hasattr(mode, '_console_ui_ref'):
-                    mode._console_ui_ref = console_ui
+                # This allows the mode to check service enabled/disabled status
+                mode._console_ui_ref = console_ui
                 
-                # Run console UI in main thread (blocks here)
-                print("Starting Kaleidoscape console...")
+                # Run console UI in main thread (blocks here) - no prints before this
                 console_ui.run()
             except ImportError as e:
                 print(f"Warning: Could not start console UI: {e}")

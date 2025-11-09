@@ -47,7 +47,7 @@ class VideoManager:
             # Logger not available, use print fallback
             self.logger = None
     
-    def load_video(self, action_name: str, video_filename: str) -> bool:
+    def load_video(self, action_name: str, video_filename: str, max_frames: Optional[int] = None) -> bool:
         """Load and pre-load all frames from a video file.
         
         Args:
@@ -82,16 +82,25 @@ class VideoManager:
             frame_count_meta = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
             duration = frame_count_meta / fps if fps > 0 else 0
             
-            # Pre-load all frames into memory
+            # Pre-load frames into memory (up to max_frames if specified)
             if self.logger:
-                self.logger.info(f"Pre-loading frames for '{action_name}'...")
+                if max_frames:
+                    self.logger.info(f"Pre-loading up to {max_frames} frames for '{action_name}'...")
+                else:
+                    self.logger.info(f"Pre-loading frames for '{action_name}'...")
             else:
-                print(f"    Pre-loading frames for '{action_name}'...")
+                if max_frames:
+                    print(f"    Pre-loading up to {max_frames} frames for '{action_name}'...")
+                else:
+                    print(f"    Pre-loading frames for '{action_name}'...")
             frames: List[np.ndarray] = []
             frame_idx = 0
             
             with suppress_stderr():
                 while True:
+                    # Stop if we've reached max_frames
+                    if max_frames and frame_idx >= max_frames:
+                        break
                     ret, frame = video_capture.read()
                     if not ret or frame is None:
                         break
@@ -120,12 +129,21 @@ class VideoManager:
                 'last_elapsed': 0.0,
             }
             
+            actual_duration = len(frames) / fps if fps > 0 else 0
             if self.logger:
-                self.logger.info(f"Pre-loaded {len(frames)} frames for '{action_name}' ({len(frames)} frames, {fps:.2f} fps, {duration:.2f}s)")
+                if max_frames:
+                    self.logger.info(f"Pre-loaded {len(frames)} frames for '{action_name}' (limited to {max_frames}, {fps:.2f} fps, {actual_duration:.2f}s)")
+                else:
+                    self.logger.info(f"Pre-loaded {len(frames)} frames for '{action_name}' ({len(frames)} frames, {fps:.2f} fps, {actual_duration:.2f}s)")
             else:
-                print(f"      ✓ Pre-loaded {len(frames)} frames")
-                print(f"  ✓ Loaded '{action_name}': {video_filename} "
-                      f"({len(frames)} frames, {fps:.2f} fps, {duration:.2f}s)")
+                if max_frames:
+                    print(f"      ✓ Pre-loaded {len(frames)} frames (limited to {max_frames})")
+                    print(f"  ✓ Loaded '{action_name}': {video_filename} "
+                          f"({len(frames)}/{max_frames} frames, {fps:.2f} fps, {actual_duration:.2f}s)")
+                else:
+                    print(f"      ✓ Pre-loaded {len(frames)} frames")
+                    print(f"  ✓ Loaded '{action_name}': {video_filename} "
+                          f"({len(frames)} frames, {fps:.2f} fps, {actual_duration:.2f}s)")
             return True
             
         except Exception as e:
@@ -135,14 +153,18 @@ class VideoManager:
                 print(f"  ✗ Error loading video '{action_name}' ({video_filename}): {e}")
             return False
     
-    def load_videos(self, video_config: Dict[str, str]) -> None:
+    def load_videos(self, video_config: Dict[str, str], max_frames_config: Optional[Dict[str, int]] = None) -> None:
         """Load multiple videos from config.
         
         Args:
             video_config: Dict mapping action names to video filenames
+            max_frames_config: Optional dict mapping action names to max frame limits
         """
         for action_name, video_filename in video_config.items():
-            self.load_video(action_name, video_filename)
+            max_frames = None
+            if max_frames_config and action_name in max_frames_config:
+                max_frames = max_frames_config[action_name]
+            self.load_video(action_name, video_filename, max_frames=max_frames)
     
     def get_frame(self, action_name: str, elapsed: float) -> Optional[np.ndarray]:
         """Get video frame at specified elapsed time.

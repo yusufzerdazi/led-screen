@@ -40,6 +40,10 @@ class GestureDetector:
         self.hand_detector = None
         self._init_manual_detector()
         
+        # Thread safety for gesture detection (runs in background thread)
+        from threading import Lock
+        self._lock = Lock()
+        
         # Gesture tracking
         self._gesture_frames: Dict[str, float] = {}
         self.gesture_threshold = 3  # Frames needed to confirm gesture
@@ -149,41 +153,43 @@ class GestureDetector:
         # Recognize gestures
         recognition_result = self.gesture_recognizer.recognize(mp_image)
         
-        if recognition_result.gestures:
-            top_gesture = recognition_result.gestures[0][0]
-            gesture_name = top_gesture.category_name
-            confidence = top_gesture.score
-            
-            if confidence > 0.7:
-                # Track consecutive frames
-                if gesture_name not in self._gesture_frames:
-                    self._gesture_frames[gesture_name] = 0.0
+        # Thread-safe update of gesture state
+        with self._lock:
+            if recognition_result.gestures:
+                top_gesture = recognition_result.gestures[0][0]
+                gesture_name = top_gesture.category_name
+                confidence = top_gesture.score
                 
-                confidence_bonus = (confidence - 0.7) * 2.0
-                self._gesture_frames[gesture_name] += 1.0 + confidence_bonus
-                
-                # Decay other gestures
-                for other_gesture in self._gesture_frames:
-                    if other_gesture != gesture_name:
-                        self._gesture_frames[other_gesture] *= self.gesture_decay_rate
-                
-                # Check if threshold reached
-                if self._gesture_frames[gesture_name] >= self.gesture_threshold:
-                    if gesture_name in self.gesture_to_status_map:
-                        config = self.gesture_to_status_map[gesture_name]
-                        setattr(self, config.flag, True)
-                        self._gesture_frames[gesture_name] = 0
-                        print(f"{gesture_name} detected! (confidence: {confidence:.2f})")
+                if confidence > 0.7:
+                    # Track consecutive frames
+                    if gesture_name not in self._gesture_frames:
+                        self._gesture_frames[gesture_name] = 0.0
+                    
+                    confidence_bonus = (confidence - 0.7) * 2.0
+                    self._gesture_frames[gesture_name] += 1.0 + confidence_bonus
+                    
+                    # Decay other gestures
+                    for other_gesture in self._gesture_frames:
+                        if other_gesture != gesture_name:
+                            self._gesture_frames[other_gesture] *= self.gesture_decay_rate
+                    
+                    # Check if threshold reached
+                    if self._gesture_frames[gesture_name] >= self.gesture_threshold:
+                        if gesture_name in self.gesture_to_status_map:
+                            config = self.gesture_to_status_map[gesture_name]
+                            setattr(self, config.flag, True)
+                            self._gesture_frames[gesture_name] = 0
+                            print(f"{gesture_name} detected! (confidence: {confidence:.2f})")
+                else:
+                    # Low confidence - decay
+                    for gesture_name in self._gesture_frames:
+                        if self._gesture_frames[gesture_name] > 0:
+                            self._gesture_frames[gesture_name] *= self.gesture_decay_rate
             else:
-                # Low confidence - decay
+                # No gesture - decay all
                 for gesture_name in self._gesture_frames:
                     if self._gesture_frames[gesture_name] > 0:
                         self._gesture_frames[gesture_name] *= self.gesture_decay_rate
-        else:
-            # No gesture - decay all
-            for gesture_name in self._gesture_frames:
-                if self._gesture_frames[gesture_name] > 0:
-                    self._gesture_frames[gesture_name] *= self.gesture_decay_rate
     
     def detect_wave(self, frame: np.ndarray) -> None:
         """Detect hand wave using manual landmark detection.
@@ -191,43 +197,46 @@ class GestureDetector:
         Args:
             frame: RGB frame as numpy array
         """
+        # Process Mediapipe outside the lock to avoid blocking
         results = self.hand_detector.process(frame)
         
-        if results.multi_hand_landmarks:
-            hand_landmarks = results.multi_hand_landmarks[0]
-            landmarks = hand_landmarks.landmark
-            
-            # Track average x position
-            wrist_x = landmarks[0].x
-            middle_mcp_x = landmarks[9].x
-            index_mcp_x = landmarks[5].x
-            avg_x = (wrist_x + middle_mcp_x + index_mcp_x) / 3.0
-            
-            self.hand_wave_history.append(avg_x)
-            if len(self.hand_wave_history) > 20:
-                self.hand_wave_history.pop(0)
-            
-            # Detect wave pattern
-            if len(self.hand_wave_history) >= 15:
-                min_x = min(self.hand_wave_history)
-                max_x = max(self.hand_wave_history)
-                movement_range = max_x - min_x
+        # Only lock when updating shared state
+        with self._lock:
+            if results.multi_hand_landmarks:
+                hand_landmarks = results.multi_hand_landmarks[0]
+                landmarks = hand_landmarks.landmark
                 
-                if movement_range > self.wave_detection_threshold:
-                    direction_changes = 0
-                    for i in range(1, len(self.hand_wave_history) - 1):
-                        prev_diff = self.hand_wave_history[i] - self.hand_wave_history[i-1]
-                        next_diff = self.hand_wave_history[i+1] - self.hand_wave_history[i]
-                        if (prev_diff > 0 and next_diff < 0) or (prev_diff < 0 and next_diff > 0):
-                            direction_changes += 1
+                # Track average x position
+                wrist_x = landmarks[0].x
+                middle_mcp_x = landmarks[9].x
+                index_mcp_x = landmarks[5].x
+                avg_x = (wrist_x + middle_mcp_x + index_mcp_x) / 3.0
+                
+                self.hand_wave_history.append(avg_x)
+                if len(self.hand_wave_history) > 20:
+                    self.hand_wave_history.pop(0)
+                
+                # Detect wave pattern
+                if len(self.hand_wave_history) >= 15:
+                    min_x = min(self.hand_wave_history)
+                    max_x = max(self.hand_wave_history)
+                    movement_range = max_x - min_x
                     
-                    if direction_changes >= 2:
-                        print("Wave detected!")
-                        self._wave_detected_flag = True
-                        self.hand_wave_history = []
-        else:
-            if len(self.hand_wave_history) > 0:
-                self.hand_wave_history.pop(0)
+                    if movement_range > self.wave_detection_threshold:
+                        direction_changes = 0
+                        for i in range(1, len(self.hand_wave_history) - 1):
+                            prev_diff = self.hand_wave_history[i] - self.hand_wave_history[i-1]
+                            next_diff = self.hand_wave_history[i+1] - self.hand_wave_history[i]
+                            if (prev_diff > 0 and next_diff < 0) or (prev_diff < 0 and next_diff > 0):
+                                direction_changes += 1
+                        
+                        if direction_changes >= 2:
+                            print("Wave detected!")
+                            self._wave_detected_flag = True
+                            self.hand_wave_history = []
+            else:
+                if len(self.hand_wave_history) > 0:
+                    self.hand_wave_history.pop(0)
     
     def detect_thumbs_up(self, frame: np.ndarray) -> None:
         """Detect thumbs up using manual landmark detection.
@@ -235,52 +244,57 @@ class GestureDetector:
         Args:
             frame: RGB frame as numpy array
         """
+        # Process Mediapipe outside the lock to avoid blocking
         results = self.hand_detector.process(frame)
         
-        if results.multi_hand_landmarks:
-            hand_landmarks = results.multi_hand_landmarks[0]
-            landmarks = hand_landmarks.landmark
-            
-            # Check thumb extended
-            thumb_tip = landmarks[4]
-            thumb_ip = landmarks[3]
-            thumb_mcp = landmarks[2]
-            thumb_extended = (thumb_tip.y < thumb_ip.y) and (thumb_tip.y < thumb_mcp.y - 0.05)
-            
-            # Check other fingers closed
-            index_closed = landmarks[8].y > landmarks[6].y + 0.02
-            middle_closed = landmarks[12].y > landmarks[10].y + 0.02
-            ring_closed = landmarks[16].y > landmarks[14].y + 0.02
-            pinky_closed = landmarks[20].y > landmarks[18].y + 0.02
-            
-            closed_fingers = sum([index_closed, middle_closed, ring_closed, pinky_closed])
-            
-            if thumb_extended and closed_fingers >= 3:
-                self.thumbs_up_frames += 1
-                if self.thumbs_up_frames >= self.thumbs_up_threshold:
-                    print("Thumbs up detected!")
-                    self._thumbs_up_detected_flag = True
-                    self.thumbs_up_frames = 0
+        # Only lock when updating shared state
+        with self._lock:
+            if results.multi_hand_landmarks:
+                hand_landmarks = results.multi_hand_landmarks[0]
+                landmarks = hand_landmarks.landmark
+                
+                # Check thumb extended
+                thumb_tip = landmarks[4]
+                thumb_ip = landmarks[3]
+                thumb_mcp = landmarks[2]
+                thumb_extended = (thumb_tip.y < thumb_ip.y) and (thumb_tip.y < thumb_mcp.y - 0.05)
+                
+                # Check other fingers closed
+                index_closed = landmarks[8].y > landmarks[6].y + 0.02
+                middle_closed = landmarks[12].y > landmarks[10].y + 0.02
+                ring_closed = landmarks[16].y > landmarks[14].y + 0.02
+                pinky_closed = landmarks[20].y > landmarks[18].y + 0.02
+                
+                closed_fingers = sum([index_closed, middle_closed, ring_closed, pinky_closed])
+                
+                if thumb_extended and closed_fingers >= 3:
+                    self.thumbs_up_frames += 1
+                    if self.thumbs_up_frames >= self.thumbs_up_threshold:
+                        print("Thumbs up detected!")
+                        self._thumbs_up_detected_flag = True
+                        self.thumbs_up_frames = 0
+                else:
+                    if self.thumbs_up_frames > 0:
+                        self.thumbs_up_frames = max(0, self.thumbs_up_frames - 1)
             else:
                 if self.thumbs_up_frames > 0:
-                    self.thumbs_up_frames = max(0, self.thumbs_up_frames - 1)
-        else:
-            if self.thumbs_up_frames > 0:
-                self.thumbs_up_frames = max(0, self.thumbs_up_frames - 2)
+                    self.thumbs_up_frames = max(0, self.thumbs_up_frames - 2)
     
     def get_wave_detected(self) -> bool:
         """Get wave detection flag and reset it."""
-        if self._wave_detected_flag:
-            self._wave_detected_flag = False
-            return True
-        return False
+        with self._lock:
+            if self._wave_detected_flag:
+                self._wave_detected_flag = False
+                return True
+            return False
     
     def get_thumbs_up_detected(self) -> bool:
         """Get thumbs up detection flag and reset it."""
-        if self._thumbs_up_detected_flag:
-            self._thumbs_up_detected_flag = False
-            return True
-        return False
+        with self._lock:
+            if self._thumbs_up_detected_flag:
+                self._thumbs_up_detected_flag = False
+                return True
+            return False
     
     def cleanup(self) -> None:
         """Clean up resources."""
