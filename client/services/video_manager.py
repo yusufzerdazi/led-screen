@@ -189,9 +189,12 @@ class VideoManager:
         frame_count = video_info['frame_count']
         duration = video_info['duration']
         
-        # Calculate target frame
+        # Calculate target frame - respect duration exactly (don't clamp to show last frame indefinitely)
         if duration > 0:
-            video_time = min(elapsed, duration)
+            # If elapsed exceeds duration, return None to indicate video has ended
+            if elapsed > duration:
+                return None
+            video_time = elapsed  # Use elapsed directly, don't clamp
             target_frame_number = int(video_time * fps)
             target_frame_number = min(target_frame_number, frame_count - 1)
             target_frame_number = max(0, target_frame_number)

@@ -8,7 +8,6 @@ from typing import Optional, Dict, List, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 import queue
-import io
 
 # Try to import psutil for system monitoring
 try:
@@ -220,73 +219,6 @@ class PerformanceTracker:
             return stats
 
 
-class PrintInterceptor:
-    """Intercepts print statements and redirects to log capture"""
-
-    def __init__(self, log_capture: LogCapture):
-        self.log_capture = log_capture
-        self.original_stdout = sys.stdout
-        self.original_stderr = sys.stderr
-        self.buffer = io.StringIO()
-        self.enabled = False
-
-    def enable(self):
-        """Enable print interception"""
-        self.enabled = True
-        sys.stdout = self
-        sys.stderr = self
-
-    def disable(self):
-        """Disable print interception"""
-        self.enabled = False
-        sys.stdout = self.original_stdout
-        sys.stderr = self.original_stderr
-
-    def write(self, text):
-        """Write intercepted text to log capture without printing to terminal"""
-        if not text.strip():
-            return
-
-        # Capture logs in background to avoid blocking
-        if self.enabled:
-            # Determine service and level from text
-            service = "System"
-            level = "INFO"
-
-            # Check for service prefixes
-            if "[STT]" in text:
-                service = "Audio (STT)"
-            elif "TTS" in text or "Piper" in text:
-                service = "Audio (TTS)"
-            elif "Camera" in text or "camera" in text:
-                service = "Camera"
-            elif "Face" in text or "face" in text:
-                service = "Face Detection"
-            elif "Gesture" in text or "gesture" in text:
-                service = "Gesture Detection"
-            elif "Video" in text or "video" in text:
-                service = "Video Manager"
-            elif "Mask" in text or "mask" in text or "Segmentation" in text:
-                service = "People Segmentation"
-            elif "Error" in text or "error" in text or "ERROR" in text or "Traceback" in text:
-                level = "ERROR"
-            elif "Warning" in text or "warning" in text or "WARNING" in text:
-                level = "WARNING"
-
-            # Add to log capture (non-blocking, don't let errors break UI)
-            try:
-                self.log_capture.add_log(service, level, text.strip())
-            except Exception:
-                pass  # Don't let log capture errors break the UI
-
-        # Don't write to original stdout/stderr - Rich handles display
-        # This prevents errors from interfering with Live widget
-
-    def flush(self):
-        """Flush stdout (no-op to prevent interference)"""
-        pass
-
-
 class KaleidoscapeUI:
     """Main console UI for Kaleidoscape monitoring"""
 
@@ -312,7 +244,7 @@ class KaleidoscapeUI:
         self.terminal_width = self.console.width
         self.terminal_height = self.console.height
 
-        self.log_capture = LogCapture(max_logs=200)
+        self.log_capture = LogCapture(max_logs=500)
         self.performance = PerformanceTracker()
         self.system_monitor = SystemMonitor(max_samples=60)
         self.services: Dict[str, ServiceStatus] = {}
@@ -327,9 +259,6 @@ class KaleidoscapeUI:
         # Flag to pause Live updates for command input
         self.pause_live = threading.Event()
         self.command_pending = threading.Event()
-
-        # Print interceptor (optional, not enabled by default)
-        self.print_interceptor = PrintInterceptor(self.log_capture)
 
         # Set up centralized logging for services
         self._setup_service_logging()
@@ -352,6 +281,7 @@ class KaleidoscapeUI:
             'Audio (TTS)': ServiceStatus(name='Audio (TTS)'),
             'Audio (STT)': ServiceStatus(name='Audio (STT)'),
             'Video Manager': ServiceStatus(name='Video Manager'),
+            'AI Service': ServiceStatus(name='AI Service'),
         }
 
     def _setup_service_logging(self):
@@ -430,7 +360,7 @@ class KaleidoscapeUI:
 
     def _create_logs_panel(self) -> Panel:
         """Create logs panel"""
-        logs = self.log_capture.get_recent_logs(8)
+        logs = self.log_capture.get_recent_logs(40)
 
         if not logs:
             return Panel("No logs yet", title="Recent Logs", border_style="blue", padding=(0, 1))
@@ -455,13 +385,37 @@ class KaleidoscapeUI:
 
         return Panel(log_text, title="Recent Logs", border_style="blue", padding=(0, 1))
 
+    def _create_progress_bar(self, progress: float, width: int = 20) -> str:
+        """Create a text-based progress bar
+        
+        Args:
+            progress: Progress value from 0.0 to 1.0
+            width: Width of the progress bar in characters
+            
+        Returns:
+            String representation of progress bar
+        """
+        progress = max(0.0, min(1.0, progress))  # Clamp to [0, 1]
+        filled = int(progress * width)
+        empty = width - filled
+        
+        # Use Unicode block characters for smoother appearance
+        if filled == width:
+            bar = "█" * width
+        elif filled == 0:
+            bar = "░" * width
+        else:
+            bar = "█" * filled + "░" * empty
+        
+        return bar
+    
     def _create_performance_panel(self) -> str:
         """Create performance metrics panel"""
         overall_fps = self.performance.get_fps('LED Display')
         overall_fps_str = f"{overall_fps:.1f}" if overall_fps else "N/A"
 
         mode_info = ""
-        if self.mode and hasattr(self.mode, 'get_status'):
+        if self.mode:
             try:
                 current_status = self.mode.get_status()
                 mode_info = f"Mode: {current_status}\n"
@@ -471,20 +425,19 @@ class KaleidoscapeUI:
         cpu_stats = self.system_monitor.get_cpu_stats()
         memory_stats = self.system_monitor.get_memory_stats()
 
-        cpu_count = self.system_monitor.cpu_count
-        cpu_current_raw = cpu_stats['current']
-        cpu_current_norm = min(100.0, (cpu_current_raw / cpu_count)) if cpu_count > 0 else cpu_current_raw
-        cpu_avg_norm = min(100.0, (cpu_stats['avg'] / cpu_count)) if cpu_count > 0 else cpu_stats['avg']
-        cpu_max_norm = min(100.0, (cpu_stats['max'] / cpu_count)) if cpu_count > 0 else cpu_stats['max']
+        # psutil.cpu_percent() already returns normalized percentage (0-100%) averaged across all cores
+        # No need to divide by cpu_count - that was incorrect
+        cpu_current = cpu_stats['current']
+        cpu_avg = cpu_stats['avg']
+        cpu_max = cpu_stats['max']
 
         perf_text = f"FPS: {overall_fps_str}\n"
         if mode_info:
             perf_text += mode_info
-        perf_text += f"CPU: {cpu_current_norm:.1f}% (avg:{cpu_avg_norm:.1f}% max:{cpu_max_norm:.1f}%)\n"
+        perf_text += f"CPU: {cpu_current:.1f}% (avg:{cpu_avg:.1f}% max:{cpu_max:.1f}%)\n"
 
         if cpu_stats['history']:
-            normalized_history = [min(100.0, (v / cpu_count)) if cpu_count > 0 else v for v in cpu_stats['history']]
-            perf_text += self._create_sparkline(normalized_history, 0, 100)
+            perf_text += self._create_sparkline(cpu_stats['history'], 0, 100)
 
         perf_text += f"Mem: {memory_stats['current']:.0f}MB (avg:{memory_stats['avg']:.0f}MB max:{memory_stats['max']:.0f}MB)\n"
 
@@ -501,8 +454,187 @@ class KaleidoscapeUI:
 
         if fps_list:
             perf_text += f"Services: {', '.join(fps_list)}\n"
+        
+        # Add GPU acceleration status
+        try:
+            from gpu_utils import get_gpu_detector
+            gpu_detector = get_gpu_detector()
+            if gpu_detector.is_gpu_available():
+                gpu_backends = [k.replace('_', ' ').title() for k, v in gpu_detector.gpu_info.items() if v]
+                perf_text += f"GPU: {', '.join(gpu_backends)}\n"
+            else:
+                perf_text += "GPU: CPU only\n"
+        except ImportError:
+            pass  # GPU utils not available
+        except Exception:
+            pass  # GPU detection failed
 
         return perf_text
+    
+    def _create_cooldowns_panel(self) -> str:
+        """Create cooldowns panel"""
+        if not self.mode:
+            return "Mode not available"
+        
+        try:
+            cooldown_info = self.mode.get_cooldown_info()
+            if not cooldown_info:
+                return "No cooldown info available"
+            
+            cooldown_text = ""
+            # Display cooldowns in order: eye, people, wave, smile, thumbs_up
+            status_order = ['eye', 'people', 'wave', 'smile', 'thumbs_up']
+            for status in status_order:
+                if status in cooldown_info:
+                    info = cooldown_info[status]
+                    remaining = info['remaining']
+                    progress = info['progress']
+                    
+                    # Format remaining time
+                    if remaining > 0:
+                        if remaining >= 60:
+                            time_str = f"{int(remaining // 60)}m {int(remaining % 60)}s"
+                        else:
+                            time_str = f"{int(remaining)}s"
+                    else:
+                        time_str = "ready"
+                    
+                    # Create progress bar (inverted - shows remaining cooldown)
+                    # progress=1.0 means cooldown complete, progress=0.0 means just started
+                    # We want to show remaining, so use (1.0 - progress)
+                    remaining_progress = 1.0 - progress
+                    bar = self._create_progress_bar(remaining_progress, width=16)
+                    
+                    # Status name formatting
+                    status_display = status.replace('_', ' ').title()
+                    
+                    cooldown_text += f"{status_display:12} [{bar}] {time_str}\n"
+            
+            return cooldown_text.strip() if cooldown_text else "No cooldowns"
+        except Exception:
+            return "Error loading cooldowns"
+    
+    def _create_status_tree_panel(self):
+        """Create status transition tree panel showing current status and possible transitions"""
+        if not self.mode:
+            return Panel("Mode not available", title="Status Transitions", border_style="magenta")
+        
+        try:
+            # Get current status and state info
+            current_status = self.mode.get_status()
+            state_info = self.mode.get_state_info()
+            status_info = self.mode.get_status_info() if hasattr(self.mode, 'get_status_info') else None
+            
+            if not state_info:
+                return Panel("No state info available", title="Status Transitions", border_style="magenta")
+            
+            # Get available statuses (excluding current)
+            available_statuses = state_info.get('available_statuses', [])
+            main_statuses = state_info.get('main_statuses', [])
+            interactive_statuses = state_info.get('interactive_statuses', [])
+            previous_status = state_info.get('previous_status')
+            
+            # Build tree visualization using Rich Text
+            tree_text = Text()
+            
+            # Show previous status if exists
+            if previous_status and previous_status != current_status:
+                tree_text.append(f"┌─ {previous_status.replace('_', ' ').title()}\n", style="dim")
+                tree_text.append("│\n", style="dim")
+                tree_text.append("└─→ ", style="dim")
+            else:
+                tree_text.append("┌─ ", style="dim")
+            
+            # Current status (highlighted)
+            current_display = current_status.replace('_', ' ').title()
+            tree_text.append(current_display, style="bold cyan")
+            
+            # Add remaining time and progress bar if available
+            if status_info and status_info.get('remaining') is not None:
+                remaining = status_info['remaining']
+                duration = status_info.get('elapsed', 0) + remaining if remaining else None
+                
+                if duration and duration > 0:
+                    progress = status_info['elapsed'] / duration
+                    progress = max(0.0, min(1.0, progress))
+                    
+                    # Format remaining time
+                    if remaining >= 60:
+                        time_str = f"{int(remaining // 60)}m {int(remaining % 60)}s"
+                    else:
+                        time_str = f"{int(remaining)}s"
+                    
+                    # Create progress bar
+                    bar = self._create_progress_bar(progress, width=20)
+                    tree_text.append(f" ({time_str})", style="yellow")
+                    tree_text.append(f" [{bar}]", style="dim")
+            
+            tree_text.append("\n")
+            
+            # Show possible transitions
+            if available_statuses:
+                # Filter out current status
+                transitions = [s for s in available_statuses if s != current_status]
+                
+                if transitions:
+                    tree_text.append("│\n", style="dim")
+                    tree_text.append("├─ Possible transitions:\n", style="dim")
+                    
+                    # Group by main vs interactive
+                    main_transitions = [s for s in transitions if s in main_statuses]
+                    interactive_transitions = [s for s in transitions if s in interactive_statuses]
+                    other_transitions = [s for s in transitions if s not in main_statuses and s not in interactive_statuses]
+                    
+                    # Show main status transitions
+                    if main_transitions:
+                        for i, status in enumerate(main_transitions):
+                            is_last = (i == len(main_transitions) - 1 and not interactive_transitions and not other_transitions)
+                            prefix = "└─" if is_last else "├─"
+                            status_display = status.replace('_', ' ').title()
+                            tree_text.append(prefix, style="dim")
+                            tree_text.append(f" {status_display}", style="green")
+                            tree_text.append(" (main)\n", style="dim")
+                    
+                    # Show interactive status transitions
+                    if interactive_transitions:
+                        for i, status in enumerate(interactive_transitions):
+                            is_last = (i == len(interactive_transitions) - 1 and not other_transitions)
+                            prefix = "└─" if is_last else "├─"
+                            status_display = status.replace('_', ' ').title()
+                            tree_text.append(prefix, style="dim")
+                            tree_text.append(f" {status_display}", style="yellow")
+                            tree_text.append(" (interactive)\n", style="dim")
+                    
+                    # Show other transitions
+                    if other_transitions:
+                        for i, status in enumerate(other_transitions):
+                            is_last = (i == len(other_transitions) - 1)
+                            prefix = "└─" if is_last else "├─"
+                            status_display = status.replace('_', ' ').title()
+                            tree_text.append(f"{prefix} {status_display}\n", style="dim")
+                else:
+                    tree_text.append("│\n", style="dim")
+                    tree_text.append("└─ No transitions available\n", style="dim")
+            else:
+                tree_text.append("│\n", style="dim")
+                tree_text.append("└─ No status info\n", style="dim")
+            
+            # Show transition rules if any
+            transition_rules = state_info.get('transition_rules', [])
+            if transition_rules:
+                tree_text.append("\nTransition rules:\n", style="dim")
+                for rule in transition_rules[:3]:  # Show max 3 rules
+                    rule_type = rule.get('type', 'unknown')
+                    if rule_type == 'time':
+                        interval = rule.get('interval', 0)
+                        tree_text.append(f"  • Time-based: every {interval}s\n", style="dim")
+                    elif rule_type == 'random':
+                        interval = rule.get('interval', 0)
+                        tree_text.append(f"  • Random: every {interval}s\n", style="dim")
+            
+            return Panel(tree_text, title="Status Transitions", border_style="magenta", padding=(0, 1))
+        except Exception as e:
+            return Panel(f"Error: {str(e)[:50]}", title="Status Transitions", border_style="magenta")
 
     def _create_sparkline(self, data: List[float], min_val: float, max_val: float, width: int = 20) -> str:
         """Create a simple sparkline graph using Unicode block characters"""
@@ -571,13 +703,23 @@ class KaleidoscapeUI:
         )
 
         layout["body"].split_row(
-            Layout(name="left", ratio=2),
-            Layout(name="logs", ratio=1),
+            Layout(name="left", ratio=3),
+            Layout(name="logs", ratio=2),
         )
 
         layout["left"].split_column(
-            Layout(name="status", ratio=3),
-            Layout(name="performance", ratio=2)
+            Layout(name="status", ratio=1),
+            Layout(name="middle"),
+        )
+        
+        layout["middle"].split_column(
+            Layout(name="performance", ratio=1),
+            Layout(name="bottom_middle"),
+        )
+        
+        layout["bottom_middle"].split_row(
+            Layout(name="cooldowns", ratio=1),
+            Layout(name="status_tree", ratio=1),
         )
 
         # Header
@@ -595,6 +737,14 @@ class KaleidoscapeUI:
         perf_content = self._create_performance_panel()
         layout["performance"].update(Panel(perf_content, title="Performance Metrics", border_style="green"))
 
+        # Cooldowns panel
+        cooldown_content = self._create_cooldowns_panel()
+        layout["cooldowns"].update(Panel(cooldown_content, title="Status Cooldowns", border_style="yellow"))
+
+        # Status tree panel
+        status_tree_panel = self._create_status_tree_panel()
+        layout["status_tree"].update(status_tree_panel)
+
         # Logs panel
         layout["logs"].update(self._create_logs_panel())
 
@@ -605,42 +755,113 @@ class KaleidoscapeUI:
 
     def _cmd_set_status(self, status: str):
         """Set mode status"""
-        if not self.mode or not hasattr(self.mode, 'set_status'):
-            self.log("UI", "ERROR", "Mode does not support set_status")
+        if not self.mode:
+            self.log("UI", "ERROR", "Mode not available")
             return
 
-        if status in ['eye', 'people']:
-            self.mode.set_status(status)
-            self.log("UI", "INFO", f"Status set to: {status}")
+        if status in ['eye', 'people', 'wave', 'smile', 'thumbs_up']:
+            success = self.mode.set_status(status)
+            if success:
+                self.log("UI", "INFO", f"Status set to: {status}")
+            else:
+                # Check cooldown info to show remaining time
+                is_on_cooldown, remaining = self.mode.is_status_on_cooldown(status)
+                if is_on_cooldown:
+                    if remaining >= 60:
+                        time_str = f"{int(remaining // 60)}m {int(remaining % 60)}s"
+                    else:
+                        time_str = f"{int(remaining)}s"
+                    self.log("UI", "WARNING", f"Status '{status}' is on cooldown. {time_str} remaining.")
+                else:
+                    self.log("UI", "ERROR", f"Failed to set status '{status}'")
         else:
-            self.log("UI", "ERROR", f"Invalid status: {status}. Use 'eye' or 'people'")
+            self.log("UI", "ERROR", f"Invalid status: {status}. Use 'eye', 'people', 'wave', 'smile', or 'thumbs_up'")
 
     def _cmd_trigger_wave(self):
         """Trigger wave gesture"""
-        if not self.mode or not hasattr(self.mode, 'set_status'):
-            self.log("UI", "ERROR", "Mode does not support gestures")
+        if not self.mode:
+            self.log("UI", "ERROR", "Mode not available")
             return
 
-        self.mode.set_status('wave', duration=5.0, substate='hand_waving')
-        self.log("UI", "INFO", "Wave gesture triggered")
+        # Calculate duration
+        duration = None
+        if self.mode.video_manager.has_video('hand_waving'):
+            video_duration = self.mode.video_manager.get_duration('hand_waving')
+            if video_duration > 0:
+                hai_scroll_time = 5.0 + 1.0  # Scroll time + buffer
+                duration = video_duration + 0.5 + hai_scroll_time
+        
+        success = self.mode.set_status('wave', duration=duration, substate='hand_waving')
+        if success:
+            self.log("UI", "INFO", "Wave gesture triggered")
+        else:
+            # Check cooldown
+            is_on_cooldown, remaining = self.mode.is_status_on_cooldown('wave')
+            if is_on_cooldown:
+                if remaining >= 60:
+                    time_str = f"{int(remaining // 60)}m {int(remaining % 60)}s"
+                else:
+                    time_str = f"{int(remaining)}s"
+                self.log("UI", "WARNING", f"Wave is on cooldown. {time_str} remaining.")
+            else:
+                self.log("UI", "ERROR", "Failed to trigger wave gesture")
 
     def _cmd_trigger_thumbs_up(self):
         """Trigger thumbs up gesture"""
-        if not self.mode or not hasattr(self.mode, 'set_status'):
-            self.log("UI", "ERROR", "Mode does not support gestures")
+        if not self.mode:
+            self.log("UI", "ERROR", "Mode not available")
             return
 
-        self.mode.set_status('thumbs_up', duration=3.0)
-        self.log("UI", "INFO", "Thumbs up gesture triggered")
+        # Calculate duration
+        duration = None
+        if self.mode.video_manager.has_video('thumbs_up'):
+            video_duration = self.mode.video_manager.get_duration('thumbs_up')
+            if video_duration > 0:
+                duration = video_duration + 0.2
+        
+        success = self.mode.set_status('thumbs_up', duration=duration)
+        if success:
+            self.log("UI", "INFO", "Thumbs up gesture triggered")
+        else:
+            # Check cooldown
+            is_on_cooldown, remaining = self.mode.is_status_on_cooldown('thumbs_up')
+            if is_on_cooldown:
+                if remaining >= 60:
+                    time_str = f"{int(remaining // 60)}m {int(remaining % 60)}s"
+                else:
+                    time_str = f"{int(remaining)}s"
+                self.log("UI", "WARNING", f"Thumbs up is on cooldown. {time_str} remaining.")
+            else:
+                self.log("UI", "ERROR", "Failed to trigger thumbs up gesture")
 
     def _cmd_trigger_smile(self):
         """Trigger smile gesture"""
-        if not self.mode or not hasattr(self.mode, 'set_status'):
-            self.log("UI", "ERROR", "Mode does not support gestures")
+        if not self.mode:
+            self.log("UI", "ERROR", "Mode not available")
             return
 
-        self.mode.set_status('smile', duration=10.0)
-        self.log("UI", "INFO", "Smile gesture triggered")
+        # Calculate duration
+        duration = None
+        if self.mode.video_manager.has_video('smile'):
+            video_duration = self.mode.video_manager.get_duration('smile')
+            if video_duration > 0:
+                scroll_time = 8.0
+                duration = video_duration + scroll_time + 1.0
+        
+        success = self.mode.set_status('smile', duration=duration)
+        if success:
+            self.log("UI", "INFO", "Smile gesture triggered")
+        else:
+            # Check cooldown
+            is_on_cooldown, remaining = self.mode.is_status_on_cooldown('smile')
+            if is_on_cooldown:
+                if remaining >= 60:
+                    time_str = f"{int(remaining // 60)}m {int(remaining % 60)}s"
+                else:
+                    time_str = f"{int(remaining)}s"
+                self.log("UI", "WARNING", f"Smile is on cooldown. {time_str} remaining.")
+            else:
+                self.log("UI", "ERROR", "Failed to trigger smile gesture")
 
     def _cmd_start_service(self, service_name: str = None):
         """Start a service"""
@@ -674,26 +895,24 @@ class KaleidoscapeUI:
             self.log("UI", "INFO", f"Service '{mapped_name}' enabled")
 
         # Actually start/restart the service based on type
-        if service_name_lower == 'camera' and hasattr(self.mode, 'camera_running'):
+        if service_name_lower == 'camera':
             if not self.mode.camera_running:
                 # Restart camera thread if camera exists
-                if hasattr(self.mode, 'camera') and self.mode.camera:
+                if self.mode.camera:
                     self.mode.camera_running = True
-                    if hasattr(self.mode, '_camera_loop'):
-                        import threading
-                        self.mode.camera_thread = threading.Thread(target=self.mode._camera_loop, daemon=True)
-                        self.mode.camera_thread.start()
+                    import threading
+                    self.mode.camera_thread = threading.Thread(target=self.mode._camera_loop, daemon=True)
+                    self.mode.camera_thread.start()
                     self.log("UI", "INFO", "Camera started")
             else:
                 self.log("UI", "INFO", "Camera already running")
 
-        elif service_name_lower == 'stt' and hasattr(self.mode, 'audio_service'):
-            if self.mode.audio_service:
-                if not self.mode.audio_service.stt_enabled:
-                    self.mode.audio_service.initialize_stt()
-                    self.log("UI", "INFO", "Speech-to-text started")
-                else:
-                    self.log("UI", "INFO", "Speech-to-text already running")
+        elif service_name_lower == 'stt':
+            if not self.mode.audio_service.stt_enabled:
+                self.mode.audio_service.initialize_stt()
+                self.log("UI", "INFO", "Speech-to-text started")
+            else:
+                self.log("UI", "INFO", "Speech-to-text already running")
 
         elif service_name_lower in ['face', 'gesture', 'segmentation']:
             # These are controlled by enable flag, which is already set above
@@ -730,43 +949,35 @@ class KaleidoscapeUI:
                 self.log("UI", "INFO", "Segmentation will stop processing frames on next check")
 
         # Actually stop the service
-        if service_name_lower == 'camera' and hasattr(self.mode, 'camera_running'):
+        if service_name_lower == 'camera':
             self.mode.camera_running = False
             self.log("UI", "INFO", "Camera stopped")
         
-        elif service_name_lower == 'face' and hasattr(self.mode, 'target_face_position'):
+        elif service_name_lower == 'face':
             # Clear face position when stopping face detection
-            if hasattr(self.mode, 'face_detection_lock'):
-                with self.mode.face_detection_lock:
-                    self.mode.target_face_position = None
-                    if hasattr(self.mode, 'detected_faces'):
-                        self.mode.detected_faces = []
-                self.log("UI", "INFO", "Face detection stopped - face position cleared")
+            with self.mode.face_detection_lock:
+                self.mode.target_face_position = None
+                self.mode.detected_faces = []
+            self.log("UI", "INFO", "Face detection stopped - face position cleared")
 
         elif service_name_lower == 'segmentation':
-            # The enabled flag is already set to False above (line 725)
-            # The mode checks this flag each frame in _camera_loop() at line 589:
-            #   if (segmentation_enabled and ...):
-            #       self.mask_detector_module.detect(frame_small)
+            # The enabled flag is already set to False above
+            # The mode checks this flag each frame in _camera_loop()
             # So when enabled=False, detection will stop on the next frame check
             
             # Clear the mask buffer immediately so old masks don't persist
-            if hasattr(self.mode, 'mask_detector_module') and self.mode.mask_detector_module:
-                if hasattr(self.mode.mask_detector_module, 'mask_buffer'):
-                    # Clear the buffer using the clear() method
-                    self.mode.mask_detector_module.mask_buffer.clear()
-                    self.log("UI", "INFO", "People segmentation buffer cleared - processing will stop on next frame")
+            self.mode.mask_detector_module.mask_buffer.clear()
+            self.log("UI", "INFO", "People segmentation buffer cleared - processing will stop on next frame")
             
             # Verify the enabled flag is set
             seg_service = self.services.get('People Segmentation')
             if seg_service:
                 self.log("UI", "INFO", f"Segmentation enabled flag: {seg_service.enabled} (should be False)")
 
-        elif service_name_lower == 'stt' and hasattr(self.mode, 'audio_service'):
-            if self.mode.audio_service and hasattr(self.mode.audio_service, 'speech_to_text'):
-                if self.mode.audio_service.speech_to_text:
-                    self.mode.audio_service.speech_to_text.stop_listening()
-                    self.log("UI", "INFO", "Speech-to-text stopped")
+        elif service_name_lower == 'stt':
+            if self.mode.audio_service.speech_to_text:
+                self.mode.audio_service.speech_to_text.stop_listening()
+                self.log("UI", "INFO", "Speech-to-text stopped")
 
     def _cmd_enable_service(self, service_name: str = None):
         """Enable a service (alias for start)"""
@@ -866,8 +1077,8 @@ Other:
 
         # Update camera status
         camera_enabled = self.services.get('Camera', ServiceStatus(name='Camera')).enabled
-        if hasattr(self.mode, 'camera') and self.mode.camera and camera_enabled:
-            if hasattr(self.mode, 'camera_running') and self.mode.camera_running:
+        if self.mode.camera and camera_enabled:
+            if self.mode.camera_running:
                 self.update_service_status('Camera', 'Running', 'Active')
                 self.track_performance('Camera')
             else:
@@ -878,7 +1089,7 @@ Other:
 
         # Update face detection
         face_enabled = self.services.get('Face Detection', ServiceStatus(name='Face Detection')).enabled
-        if hasattr(self.mode, 'face_detector_module') and self.mode.face_detector_module and face_enabled:
+        if self.mode.face_detector_module and face_enabled:
             self.update_service_status('Face Detection', 'Running', 'Active')
             self.track_performance('Face Detection')
         else:
@@ -887,12 +1098,11 @@ Other:
 
         # Update gesture detection
         gesture_enabled = self.services.get('Gesture Detection', ServiceStatus(name='Gesture Detection')).enabled
-        if hasattr(self.mode, 'gesture_detector_module') and self.mode.gesture_detector_module and gesture_enabled:
+        if self.mode.gesture_detector_module and gesture_enabled:
             status = 'Running'
             details = 'AI + Manual'
-            if hasattr(self.mode.gesture_detector_module, 'gesture_recognizer_available'):
-                if not self.mode.gesture_detector_module.gesture_recognizer_available:
-                    details = 'Manual only'
+            if not self.mode.gesture_detector_module.gesture_recognizer_available:
+                details = 'Manual only'
             self.update_service_status('Gesture Detection', status, details)
             self.track_performance('Gesture Detection')
         else:
@@ -901,7 +1111,7 @@ Other:
 
         # Update people segmentation
         segmentation_enabled = self.services.get('People Segmentation', ServiceStatus(name='People Segmentation')).enabled
-        if hasattr(self.mode, 'mask_detector_module') and self.mode.mask_detector_module and segmentation_enabled:
+        if self.mode.mask_detector_module and segmentation_enabled:
             self.update_service_status('People Segmentation', 'Running', 'Active')
             self.track_performance('People Segmentation')
         else:
@@ -909,19 +1119,32 @@ Other:
             self.update_service_status('People Segmentation', 'Stopped', status)
 
         # Update video manager
-        if hasattr(self.mode, 'video_manager') and self.mode.video_manager:
-            video_count = len(self.mode.video_config) if hasattr(self.mode, 'video_config') else 0
-            self.update_service_status('Video Manager', 'Running', f'{video_count} videos loaded')
-        else:
-            self.update_service_status('Video Manager', 'Stopped', 'Not initialized')
+        video_count = len(self.mode.video_config)
+        self.update_service_status('Video Manager', 'Running', f'{video_count} videos loaded')
 
         # Update audio services
-        if hasattr(self.mode, 'audio_service') and self.mode.audio_service:
-            self.update_service_status('Audio (TTS)', 'Running', 'Piper TTS')
-            self.update_service_status('Audio (STT)', 'Running', 'Whisper STT')
+        self.update_service_status('Audio (TTS)', 'Running', 'Piper TTS')
+        self.update_service_status('Audio (STT)', 'Running', 'Whisper STT')
+        
+        # Update AI service (LLM)
+        if hasattr(self.mode, 'llm_command_handler') and self.mode.llm_command_handler:
+            llm_handler = self.mode.llm_command_handler
+            if llm_handler.use_llm:
+                # Check if LLM is available by checking if thread is running
+                if llm_handler.llm_thread and llm_handler.llm_thread.is_alive():
+                    # Count pending requests
+                    with llm_handler.pending_lock:
+                        pending_count = len([k for k, v in llm_handler.pending_requests.items() if v.get('result') is None])
+                    details = f"Ollama ({llm_handler.model_name})"
+                    if pending_count > 0:
+                        details += f" - {pending_count} pending"
+                    self.update_service_status('AI Service', 'Running', details)
+                else:
+                    self.update_service_status('AI Service', 'Stopped', 'Thread not running')
+            else:
+                self.update_service_status('AI Service', 'Stopped', 'LLM disabled')
         else:
-            self.update_service_status('Audio (TTS)', 'Stopped', 'Not initialized')
-            self.update_service_status('Audio (STT)', 'Stopped', 'Not initialized')
+            self.update_service_status('AI Service', 'Stopped', 'Not initialized')
 
     def run(self):
         """Run the console UI"""
@@ -1119,13 +1342,6 @@ Other:
                 self.console.control("\x1b[?7h")  # DECAWM on
             except Exception:
                 pass
-
-            # Ensure print interceptor is disabled (if it was enabled)
-            if hasattr(self, 'print_interceptor') and self.print_interceptor.enabled:
-                try:
-                    self.print_interceptor.disable()
-                except Exception:
-                    pass
 
             try:
                 self.log("UI", "INFO", "Kaleidoscape console stopped")

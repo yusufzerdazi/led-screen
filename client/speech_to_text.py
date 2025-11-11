@@ -9,9 +9,17 @@ import pyaudio
 import wave
 import tempfile
 import os
+import sys
 import threading
 import time
 import numpy as np
+
+# Add parent directory to path for logger import
+_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+from logger import get_logger
+from gpu_utils import get_gpu_detector
 
 # Try to import speech recognition libraries
 try:
@@ -49,6 +57,9 @@ class SpeechToText:
             use_whisper: If True, use local Whisper model; if False, use speech_recognition with online services
             input_device_index: Optional microphone device index (None = use default)
         """
+        # Set up logger
+        self.logger = get_logger("Audio (STT)")
+        
         self.input_device_index = input_device_index
         self.model_size = model_size
         self.language = language
@@ -68,21 +79,36 @@ class SpeechToText:
         
         # Initialize recognizer
         if self.use_whisper:
-            print(f"[STT] Loading Whisper model: {model_size}")
+            self.logger.info(f"Loading Whisper model: {model_size}")
             try:
-                self.whisper_model = whisper.load_model(model_size)
-                print(f"[STT] Whisper model loaded successfully")
+                # Try to use GPU if available
+                device = self._get_whisper_device()
+                if device != 'cpu':
+                    self.logger.info(f"Using GPU device: {device}")
+                    # Whisper will automatically use GPU if PyTorch detects it
+                    # We can explicitly move model to device after loading
+                    self.whisper_model = whisper.load_model(model_size, device=device)
+                else:
+                    self.whisper_model = whisper.load_model(model_size)
+                self.logger.info(f"Whisper model loaded successfully on {device}")
             except Exception as e:
-                print(f"[STT] Error loading Whisper model: {e}")
-                print("[STT] Falling back to speech_recognition")
-                self.use_whisper = False
+                self.logger.error(f"Error loading Whisper model: {e}")
+                # Try CPU fallback
+                try:
+                    self.logger.info("Retrying Whisper model load on CPU...")
+                    self.whisper_model = whisper.load_model(model_size, device='cpu')
+                    self.logger.info("Whisper model loaded on CPU")
+                except Exception as e2:
+                    self.logger.error(f"Error loading Whisper model on CPU: {e2}")
+                    self.logger.warning("Falling back to speech_recognition")
+                    self.use_whisper = False
         
         if not self.use_whisper:
             if not SPEECH_RECOGNITION_AVAILABLE:
                 raise ImportError("Neither whisper nor speech_recognition available. Install one of them.")
             self.recognizer = sr.Recognizer()
             self.microphone = sr.Microphone()
-            print("[STT] Using speech_recognition library")
+            self.logger.info("Using speech_recognition library")
         
         # Audio buffer for continuous listening
         self.audio_buffer = []
@@ -92,6 +118,9 @@ class SpeechToText:
         
         # Lock for Whisper model (will be created after model loads)
         self.whisper_lock = None
+        
+        # GPU detector for device selection
+        self.gpu_detector = get_gpu_detector()
         
         # Recognition settings
         self.phrase_timeout = 3.0  # Seconds of silence before processing (increased to reduce processing frequency)
@@ -107,7 +136,7 @@ class SpeechToText:
         # Status 2 = paInputOverflow (can happen occasionally, not critical)
         # Status 4 = paInputUnderflow (can happen occasionally, not critical)
         if status and status not in [2, 4]:  # Ignore overflow/underflow warnings
-            print(f"[STT] Audio callback status: {status}")
+            self.logger.warning(f"Audio callback status: {status}")
         
         # Check audio level to detect silence
         audio_array = np.frombuffer(in_data, dtype=np.int16)
@@ -138,7 +167,7 @@ class SpeechToText:
     
     def _audio_capture_loop(self):
         """Background thread for capturing audio"""
-        print("[STT] Audio capture started")
+        self.logger.info("Audio capture started")
         
         try:
             self.audio = pyaudio.PyAudio()
@@ -148,7 +177,7 @@ class SpeechToText:
             
             try:
                 device_info = self.audio.get_device_info_by_index(input_device_index)
-                print(f"[STT] Using microphone device {input_device_index}: {device_info['name']}")
+                self.logger.info(f"Using microphone device {input_device_index}: {device_info['name']}")
                 
                 # Get device's default sample rate or use our preferred rate
                 device_sample_rate = int(device_info.get('defaultSampleRate', self.RATE))
@@ -181,7 +210,7 @@ class SpeechToText:
                         test_stream.stop_stream()
                         test_stream.close()
                         actual_rate = rate
-                        print(f"[STT] Using sample rate: {actual_rate}Hz")
+                        self.logger.info(f"Using sample rate: {actual_rate}Hz")
                         break
                     except:
                         continue
@@ -193,17 +222,17 @@ class SpeechToText:
                 self.RATE = actual_rate
                 
             except Exception as e:
-                print(f"[STT] Error with device {input_device_index}: {e}")
-                print("[STT] Falling back to default device...")
+                self.logger.warning(f"Error with device {input_device_index}: {e}")
+                self.logger.info("Falling back to default device...")
                 try:
                     default_info = self.audio.get_default_input_device_info()
                     input_device_index = default_info['index']
                     actual_rate = int(default_info.get('defaultSampleRate', self.RATE))
                     self.RATE = actual_rate
-                    print(f"[STT] Using default device: {default_info['name']} (index {input_device_index}, rate {actual_rate}Hz)")
+                    self.logger.info(f"Using default device: {default_info['name']} (index {input_device_index}, rate {actual_rate}Hz)")
                 except:
                     input_device_index = 0
-                    print("[STT] Using device index 0 with default rate")
+                    self.logger.info("Using device index 0 with default rate")
             
             # Open audio stream with the determined rate
             self.stream = self.audio.open(
@@ -217,14 +246,14 @@ class SpeechToText:
             )
             
             self.stream.start_stream()
-            print(f"[STT] Audio stream started on device {input_device_index} at {self.RATE}Hz")
+            self.logger.info(f"Audio stream started on device {input_device_index} at {self.RATE}Hz")
             
             # Keep thread alive
             while self.is_listening and self.stream.is_active():
                 time.sleep(0.1)
                 
         except Exception as e:
-            print(f"[STT] Error in audio capture: {e}")
+            self.logger.error(f"Error in audio capture: {e}")
             import traceback
             traceback.print_exc()
         finally:
@@ -233,7 +262,14 @@ class SpeechToText:
                 self.stream.close()
             if self.audio:
                 self.audio.terminate()
-            print("[STT] Audio capture stopped")
+            self.logger.info("Audio capture stopped")
+    
+    def _get_whisper_device(self) -> str:
+        """Get the best device for Whisper inference."""
+        device_type, device_name = self.gpu_detector.get_whisper_device()
+        if device_name:
+            self.logger.info(f"Whisper will use {device_type} device: {device_name}")
+        return device_type
     
     def _process_audio_with_whisper(self, audio_data):
         """Process audio data using Whisper model"""
@@ -294,12 +330,12 @@ class SpeechToText:
             text = result["text"].strip()
             
             if text:
-                print(f"[STT] Transcribed: {text}")
+                self.logger.info(f"Transcribed: {text}")
                 return text
             return None
             
         except Exception as e:
-            print(f"[STT] Error processing audio with Whisper: {e}")
+            self.logger.error(f"Error processing audio with Whisper: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -326,15 +362,15 @@ class SpeechToText:
         except sr.UnknownValueError:
             return None
         except sr.RequestError as e:
-            print(f"[STT] Error with speech recognition service: {e}")
+            self.logger.error(f"Error with speech recognition service: {e}")
             return None
         except Exception as e:
-            print(f"[STT] Error processing audio with speech_recognition: {e}")
+            self.logger.error(f"Error processing audio with speech_recognition: {e}")
             return None
     
     def _recognition_loop(self):
         """Background thread for processing audio and recognizing speech"""
-        print("[STT] Recognition loop started")
+        self.logger.info("Recognition loop started")
         
         last_debug_time = time.time()
         debug_interval = 5.0  # Print debug info every 5 seconds
@@ -402,11 +438,11 @@ class SpeechToText:
                                     try:
                                         self.on_text_callback(text)
                                     except Exception as e:
-                                        print(f"[STT] Error in callback: {e}")
+                                        self.logger.error(f"Error in callback: {e}")
                                         import traceback
                                         traceback.print_exc()
                         except Exception as e:
-                            print(f"[STT] Error processing audio: {e}")
+                            self.logger.error(f"Error processing audio: {e}")
                             import traceback
                             traceback.print_exc()
                     
@@ -420,7 +456,7 @@ class SpeechToText:
                 time.sleep(0.1)
                 
             except Exception as e:
-                print(f"[STT] Error in recognition loop: {e}")
+                self.logger.error(f"Error in recognition loop: {e}")
                 import traceback
                 traceback.print_exc()
                 time.sleep(1.0)
@@ -433,17 +469,17 @@ class SpeechToText:
             on_text_callback: Optional callback function(text) called when text is transcribed
         """
         if not PYAUDIO_AVAILABLE:
-            print("[STT] PyAudio not available, cannot start listening")
+            self.logger.error("PyAudio not available, cannot start listening")
             return False
         
         if self.is_listening:
-            print("[STT] Already listening")
+            self.logger.info("Already listening")
             return True
         
-        print("[STT] Starting speech-to-text...")
-        print(f"[STT] Using {'Whisper' if self.use_whisper else 'speech_recognition'}")
-        print(f"[STT] Model: {self.model_size if self.use_whisper else 'N/A'}")
-        print(f"[STT] Sample rate: {self.RATE}Hz, Channels: {self.CHANNELS}")
+        self.logger.info("Starting speech-to-text...")
+        self.logger.info(f"Using {'Whisper' if self.use_whisper else 'speech_recognition'}")
+        self.logger.info(f"Model: {self.model_size if self.use_whisper else 'N/A'}")
+        self.logger.info(f"Sample rate: {self.RATE}Hz, Channels: {self.CHANNELS}")
         
         self.on_text_callback = on_text_callback
         self.is_listening = True
@@ -459,7 +495,7 @@ class SpeechToText:
         self.recognition_thread = threading.Thread(target=self._recognition_loop, daemon=True)
         self.recognition_thread.start()
         
-        print("[STT] Speech-to-text listening started - speak into microphone")
+        self.logger.info("Speech-to-text listening started - speak into microphone")
         return True
     
     def stop_listening(self):
@@ -467,7 +503,7 @@ class SpeechToText:
         if not self.is_listening:
             return
         
-        print("[STT] Stopping speech-to-text...")
+        self.logger.info("Stopping speech-to-text...")
         self.is_listening = False
         
         # Wait for threads to finish
@@ -476,7 +512,7 @@ class SpeechToText:
         if self.recognition_thread:
             self.recognition_thread.join(timeout=2.0)
         
-        print("[STT] Speech-to-text stopped")
+        self.logger.info("Speech-to-text stopped")
     
     def cleanup(self):
         """Clean up resources"""

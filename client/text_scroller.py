@@ -142,7 +142,7 @@ class TextScroller:
     
     def render_scrolling_text(self, text, elapsed, scroll_speed=20.0, 
                              wobble_amount=1.0, font_size_scale=1.0, 
-                             base_color=(255, 255, 255)):
+                             base_color=(255, 255, 255), color_source=None):
         """Render scrolling text that moves across the screen with wobbly effects
         
         Args:
@@ -151,7 +151,8 @@ class TextScroller:
             scroll_speed: Pixels per second
             wobble_amount: Amount of wobbling effect (0 = no wobble)
             font_size_scale: Scale factor for font size
-            base_color: RGB color tuple for text (default: white)
+            base_color: RGB color tuple for text (default: white) - used if color_source is None
+            color_source: Optional PIL Image to sample colors from (text pixels will use colors from this image)
         
         Returns:
             PIL Image with scrolling text
@@ -163,6 +164,14 @@ class TextScroller:
         pixel_map = self._text_to_pixel_map(text, font_size_scale)
         if not pixel_map:
             return img
+        
+        # Prepare color source if provided
+        color_source_pixels = None
+        if color_source:
+            # Resize color source to match display dimensions if needed
+            if color_source.size != (self.width, self.height):
+                color_source = color_source.resize((self.width, self.height), Image.LANCZOS)
+            color_source_pixels = color_source.load()
         
         # Calculate text bounds
         min_x = min(px for px, py in pixel_map)
@@ -206,9 +215,9 @@ class TextScroller:
         scroll_progress = elapsed / scroll_time if scroll_time > 0 else 0.0
         current_x = start_x - (scroll_progress * scroll_distance)
         
-        # Center vertically - move up by 10 pixels as requested
+        # Center vertically - move up by 14 pixels (1 pixel lower than before)
         # Use consistent vertical centering regardless of wobble
-        base_center_y = self.height // 2 - 10
+        base_center_y = self.height // 2 - 14
         
         # Draw pixels - wobble is applied as pure visual transformation
         # Math breakdown:
@@ -238,6 +247,14 @@ class TextScroller:
             
             # Only draw if within screen bounds
             if 0 <= screen_x < self.width and 0 <= screen_y < self.height:
-                pixels[screen_x, screen_y] = base_color
+                # Use color from source if available, otherwise use base_color
+                if color_source_pixels:
+                    # Sample color from color_source at the screen position
+                    # Clamp coordinates to valid range
+                    src_x = max(0, min(self.width - 1, screen_x))
+                    src_y = max(0, min(self.height - 1, screen_y))
+                    pixels[screen_x, screen_y] = color_source_pixels[src_x, src_y]
+                else:
+                    pixels[screen_x, screen_y] = base_color
         
         return img

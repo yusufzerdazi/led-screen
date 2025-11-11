@@ -18,12 +18,24 @@ if _parent_dir not in sys.path:
 from detectors import GestureDetector, FaceDetector, MaskDetector
 from services import VideoManager, AudioService
 from text_scroller import TextScroller
+from state_manager import StateManager
+from llm_command_handler import LLMCommandHandler
 from PIL import Image, ImageDraw, ImageFont
 import time
 import numpy as np
 from threading import Thread, Lock
 from queue import Queue, Empty
+from typing import List, Dict
 import os
+from logger import get_logger
+
+# Enable multi-threading for NumPy and OpenCV to utilize all CPU cores
+os.environ.setdefault('OPENCV_NUM_THREADS', '0')  # 0 = use all available threads
+os.environ.setdefault('OMP_NUM_THREADS', '0')  # OpenMP threads for NumPy (0 = all cores)
+os.environ.setdefault('MKL_NUM_THREADS', '0')  # Intel MKL threads (0 = all cores)
+os.environ.setdefault('NUMEXPR_NUM_THREADS', '0')  # NumExpr threads (0 = all cores)
+os.environ.setdefault('VECLIB_MAXIMUM_THREADS', '0')  # Accelerate framework (macOS)
+
 try:
     # Try to set CPU affinity for better performance on multi-core systems
     import psutil
@@ -31,6 +43,22 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 import cv2
+
+# Set OpenCV to use all threads
+try:
+    cv2.setNumThreads(0)  # 0 = use all available threads
+except AttributeError:
+    pass  # Older OpenCV versions might not have this
+
+# Enable GPU acceleration for OpenCV if available
+try:
+    from gpu_utils import get_gpu_detector
+    gpu_detector = get_gpu_detector()
+    gpu_detector.enable_opencv_gpu()
+except ImportError:
+    pass  # GPU utils not available
+except Exception:
+    pass  # GPU detection failed, continue with CPU
 import math
 import random
 import urllib.parse
@@ -74,13 +102,25 @@ class DecompressionMode(WebsiteMode):
     The decompression mode supports multiple statuses with different visual behaviors:
     - 'eye': Default status showing the 3D eyeball with face-tracking pupil
     - 'people': Shows people outlines from camera as masks for Hydra visuals
+    - 'wave', 'smile', 'thumbs_up': Interactive statuses triggered by user gestures
     
-    To switch statuses, use:
-        mode.set_status('eye')    # Switch to eye status
-        mode.set_status('people') # Switch to people status
+    State Management:
+    The mode includes a robust state transition system that supports:
+    - Time-based transitions: Switch between statuses after a set interval
+    - Random transitions: Randomly select from a pool of available statuses
+    - User interaction: Gesture detection triggers interactive statuses
+    - Cooldown integration: All transitions respect cooldown timers
     
-    To get current status:
-        current_status = mode.get_status()
+    Example usage:
+        # Switch between eye and people every 10 minutes
+        mode.add_transition_rule('time', interval=600, from_status='eye', to_status='people')
+        mode.add_transition_rule('time', interval=600, from_status='people', to_status='eye')
+        
+        # Randomly choose from main statuses every 5 minutes
+        mode.add_transition_rule('random', interval=300, status_pool=['eye', 'people'])
+        
+        # Get state information
+        info = mode.get_state_info()
     
     Future statuses can be added by implementing new _render_*_status() methods
     and updating the update() method to route to them.
@@ -88,6 +128,9 @@ class DecompressionMode(WebsiteMode):
     
     def __init__(self, width=40, height=30):
         super().__init__(width, height)
+        
+        # Set up logger
+        self.logger = get_logger("Decompression Mode")
         
         # Camera settings
         self.camera_enabled = True
@@ -122,9 +165,10 @@ class DecompressionMode(WebsiteMode):
         # Video configuration
         self.videos_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'videos')
         self.video_config = {
-            'hand_waving': {'filename': 'hand_wave.mp4', 'max_frames': 154},
+            'hand_waving': {'filename': 'hand_wave.mp4', 'max_frames': 162},
             'thumbs_up': {'filename': 'thumbs_up.mp4'},
             'smile': {'filename': 'smile.mp4'},
+            'think': {'filename': 'think.mp4'},
         }
         # Store max_frames per video for frame limiting
         self.video_max_frames = {}
@@ -133,13 +177,198 @@ class DecompressionMode(WebsiteMode):
                 self.video_max_frames[action_name] = config['max_frames']
         
         # State management system
-        self.current_status = 'eye'  # Current status: 'eye', 'people', 'wave', 'thumbs_up', 'smile'
+        self.current_status = 'eye'  # Current status: 'eye', 'people', 'raw', 'wave', 'thumbs_up', 'smile', 'think'
         self.status_lock = Lock()
         self.status_start_time = time.time()
         self.status_duration = None
         self.status_substate = None
         self.previous_status = None
         self.status_transition_callbacks = {}
+        
+        # Raw mode state - sparse sketches
+        self.available_sparse_sketches = []
+        self.current_sparse_sketch = None
+        self.sparse_sketch_switch_interval = 60.0  # Switch sketch every 1 minute
+        self.last_sparse_sketch_switch_time = None
+        
+        # Pending LLM response tracking for think status
+        self.pending_llm_response = None  # Stores (result_dict, original_text) when LLM is processing
+        self.pending_llm_lock = Lock()
+        self.think_return_status = None  # Main status to return to after think completes
+        
+        # People detection timeout tracking
+        self.people_mode_entered_time = None
+        self.last_people_segment_time = None
+        self.people_timeout_seconds = 5.0  # Switch to eye if no segments for 5 seconds
+        
+        # Cooldown times: eye/people/raw = 10 min (600s), gestures = 1 min (60s)
+        status_cooldowns = {
+            'eye': 600.0,      # 10 minutes
+            'people': 600.0,   # 10 minutes
+            'raw': 600.0,     # 10 minutes
+            'wave': 60.0,      # 1 minute
+            'smile': 60.0,     # 1 minute
+            'thumbs_up': 60.0, # 1 minute
+            'think': 60.0,     # 1 minute
+        }
+        
+        # Dynamically add gesture cooldowns from config manager
+        # This will be populated after config_manager is initialized
+        main_statuses = ['eye', 'people', 'raw']
+        interactive_statuses = ['wave', 'smile', 'thumbs_up', 'think']
+        
+        # Initialize state manager
+        self.state_manager = StateManager(
+            status_cooldowns=status_cooldowns,
+            main_statuses=main_statuses,
+            interactive_statuses=interactive_statuses
+        )
+        
+        # Status configuration - defines behavior for each status
+        self.status_config = {
+            'wave': {
+                'video_name': 'hand_waving',
+                'has_substates': True,
+                'default_substate': 'hand_waving',
+                'video_buffer': 0.5,
+                'text_buffer': 0.5,
+                'has_text_scroller': True,
+                'render_method': self._render_wave_status,
+            },
+            'thumbs_up': {
+                'video_name': 'thumbs_up',
+                'has_substates': False,
+                'video_buffer': 0.2,
+                'text_buffer': 0.0,
+                'has_text_scroller': False,
+                'render_method': self._render_thumbs_up_status,
+            },
+            'smile': {
+                'video_name': 'smile',
+                'has_substates': False,
+                'video_buffer': 0.0,
+                'text_buffer': 0.5,
+                'has_text_scroller': True,
+                'render_method': self._render_smile_status,
+            },
+            'think': {
+                'video_name': 'think',
+                'has_substates': False,
+                'video_buffer': 0.0,
+                'text_buffer': 1.0,
+                'has_text_scroller': False,  # Uses custom thinking text
+                'thinking_text_duration': 10.0,
+                'render_method': self._render_think_status,
+            },
+            'people': {
+                'video_name': None,
+                'has_substates': False,
+                'render_method': self._render_people_status,
+            },
+            'eye': {
+                'video_name': None,
+                'has_substates': False,
+                'render_method': self._render_eye_status,
+            },
+            'raw': {
+                'video_name': None,
+                'has_substates': False,
+                'render_method': self._render_raw_status,
+            },
+            # New Burning Man gestures
+            'peace': {
+                'video_name': 'peace',
+                'has_substates': False,
+                'video_buffer': 0.2,
+                'text_buffer': 0.5,
+                'has_text_scroller': True,
+                'render_method': self._render_gesture_status,
+            },
+            'heart': {
+                'video_name': 'heart',
+                'has_substates': False,
+                'video_buffer': 0.2,
+                'text_buffer': 0.5,
+                'has_text_scroller': True,
+                'render_method': self._render_gesture_status,
+            },
+            'rock_on': {
+                'video_name': 'rock_on',
+                'has_substates': False,
+                'video_buffer': 0.2,
+                'text_buffer': 0.5,
+                'has_text_scroller': True,
+                'render_method': self._render_gesture_status,
+            },
+            'point': {
+                'video_name': 'point',
+                'has_substates': False,
+                'video_buffer': 0.2,
+                'text_buffer': 0.5,
+                'has_text_scroller': True,
+                'render_method': self._render_gesture_status,
+            },
+            'clap': {
+                'video_name': 'clap',
+                'has_substates': False,
+                'video_buffer': 0.2,
+                'text_buffer': 0.5,
+                'has_text_scroller': True,
+                'render_method': self._render_gesture_status,
+            },
+            'fist_pump': {
+                'video_name': 'fist_pump',
+                'has_substates': False,
+                'video_buffer': 0.2,
+                'text_buffer': 0.5,
+                'has_text_scroller': True,
+                'render_method': self._render_gesture_status,
+            },
+        }
+        
+        # Initialize LLM command handler
+        self.llm_command_handler = LLMCommandHandler(
+            state_manager=self.state_manager,
+            llm_api_url="http://localhost:11434",  # Ollama default
+            model_name="gemma2:2b",
+            use_llm=True
+        )
+        self.llm_command_handler.set_status_change_callback(self._handle_voice_status_change)
+        self.llm_command_handler.set_tts_callback(self._handle_voice_tts)
+        
+        # Initialize centralized config manager
+        from config_manager import ConfigManager
+        self.config_manager = ConfigManager(self.llm_command_handler.response_storage)
+        
+        # Dynamically add gesture cooldowns and interactive statuses from config manager
+        gesture_names = self.config_manager.get_available_gestures()
+        for gesture_name in gesture_names:
+            if gesture_name not in ['wave', 'smile', 'thumbs_up']:  # Already added above
+                status_cooldowns[gesture_name] = 60.0  # 1 minute cooldown
+                if gesture_name not in interactive_statuses:
+                    interactive_statuses.append(gesture_name)
+            
+            # Dynamically add status configs for all gestures
+            if gesture_name not in self.status_config:  # Skip if already configured
+                self.status_config[gesture_name] = {
+                    'video_name': gesture_name,
+                    'has_substates': False,
+                    'video_buffer': 0.2,
+                    'text_buffer': 0.5,
+                    'has_text_scroller': True,
+                    'render_method': self._render_gesture_status,
+                }
+        
+        # Update state manager with dynamic cooldowns
+        self.state_manager.status_cooldowns.update(status_cooldowns)
+        self.state_manager.interactive_statuses = interactive_statuses
+        
+        # Store gesture trigger configs for easy access (loaded lazily) - DEPRECATED, use config_manager
+        self.gesture_configs = {}  # Maps gesture name -> config dict
+        self.tts_triggers = []  # Will be loaded lazily on first use
+        
+        # Register state manager callbacks
+        self.state_manager.register_status_change_callback(self._on_state_manager_status_change)
         
         # Eye 3D model parameters
         self.eye_center_x = width / 2
@@ -205,13 +434,13 @@ class DecompressionMode(WebsiteMode):
         self.current_sketch = None
         self.available_sketches = []
         
-        # Font settings - use KiwiSoda.ttf from client folder
+        # Font settings - use slkscr.ttf (Silkscreen font) from client folder
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # client/
-        font_path = os.path.join(script_dir, "KiwiSoda.ttf")
+        font_path = os.path.join(script_dir, "slkscr.ttf")
         
-        # Fallback to slkscr.ttf if KiwiSoda not found, or system font as last resort
+        # Fallback to KiwiSoda.ttf if slkscr not found, or system font as last resort
         if not os.path.exists(font_path):
-            font_path = os.path.join(script_dir, "slkscr.ttf")
+            font_path = os.path.join(script_dir, "KiwiSoda.ttf")
         if not os.path.exists(font_path):
             # System fallback
             try:
@@ -227,10 +456,9 @@ class DecompressionMode(WebsiteMode):
         
         # Audio service (initialized in init())
         self.audio_service: AudioService = None
-        self.tts_message = "welcome to decompression"
-        self.tts_interval_min = 30.0
-        self.tts_interval_max = 90.0
-        self.next_tts_time = time.time() + random.uniform(self.tts_interval_min, self.tts_interval_max)
+        # TTS triggers will be loaded from config
+        self.tts_triggers = []
+        self.next_tts_time = None
     
     def _initialize_circles(self):
         """Initialize glitter circles with random positions and spawn times"""
@@ -267,6 +495,22 @@ class DecompressionMode(WebsiteMode):
             return lines
         except Exception as e:
             print(f"Error loading sketches: {e}")
+            return []
+    
+    def _load_all_sparse_sketches(self):
+        """Load all sparse sketches from sketches_sparse.txt"""
+        script_dir = os.path.dirname(os.path.abspath(__file__))  # client/modes/
+        sketches_file = os.path.join(script_dir, "sketches_sparse.txt")
+        
+        if not os.path.exists(sketches_file):
+            return []
+        
+        try:
+            with open(sketches_file, 'r', encoding='utf-8') as f:
+                lines = [line.strip() for line in f.readlines() if line.strip()]
+            return lines
+        except Exception as e:
+            self.logger.error(f"Error loading sparse sketches: {e}")
             return []
     
     def _load_sketches(self):
@@ -490,8 +734,16 @@ class DecompressionMode(WebsiteMode):
         
         # Initialize audio service
         try:
-            self.audio_service = AudioService()
-            self.audio_service.initialize_tts()
+            # Get TTS output device from LLM handler
+            tts_output_device = self.llm_command_handler.tts_output_device_index
+            
+            self.audio_service = AudioService(tts_output_device_index=tts_output_device)
+            tts_initialized = self.audio_service.initialize_tts()
+            if not tts_initialized:
+                print("Warning: TTS initialization failed - TTS will not be available")
+                print("  Check that Piper TTS model is installed in ~/.local/share/piper/voices/")
+            else:
+                print("TTS initialized successfully")
             self.audio_service.initialize_stt(
                 input_device_index=None,
                 voice_command_callback=self._handle_voice_command
@@ -499,40 +751,485 @@ class DecompressionMode(WebsiteMode):
             print("Audio service initialized")
         except Exception as e:
             print(f"Warning: Could not initialize audio service: {e}")
+            import traceback
+            traceback.print_exc()
             self.audio_service = None
+        
+        # Initialize default transition rules
+        self._setup_default_transition_rules()
+        
+        # Preload gesture configs from CSV to avoid missing configs during runtime
+        self._preload_gesture_configs()
+        
+        # Load gesture and TTS configs lazily (on first use) to avoid blocking startup
+        # They will be loaded when first needed
         
         print("Decompression mode (3D eyeball) initialized")
     
+    def _setup_default_transition_rules(self):
+        """Set up default transition rules for the state management system
+        
+        Example: Switch between eye and people every 10 minutes
+        """
+        # Example: Switch between eye and people every 10 minutes (600 seconds)
+        # Uncomment to enable:
+        # self.add_transition_rule('time', interval=600, from_status='eye', to_status='people')
+        # self.add_transition_rule('time', interval=600, from_status='people', to_status='eye')
+        
+        # Example: Randomly choose from main statuses every 5 minutes
+        # Uncomment to enable:
+        # self.add_transition_rule('random', interval=300, status_pool=self.state_manager.main_statuses)
+        
+        pass  # No default rules - user can add their own
+    
+    def _preload_gesture_configs(self):
+        """Preload gesture configs from CSV to avoid missing configs during runtime"""
+        gesture_names = self.config_manager.get_available_gestures()
+        for gesture_name in gesture_names:
+            try:
+                # Use config manager to load
+                config = self.config_manager.get_gesture_config(gesture_name)
+                if config:
+                    self.gesture_configs[gesture_name] = config
+                    self.logger.info(f"Preloaded gesture config for: {gesture_name}")
+                else:
+                    # Try LLM handler as fallback
+                    trigger = self.llm_command_handler.get_gesture_trigger(gesture_name)
+                    if trigger:
+                        self.gesture_configs[gesture_name] = trigger
+                        self.config_manager.save_gesture_config(gesture_name, trigger)
+                        self.logger.info(f"Preloaded gesture config for: {gesture_name} (from LLM)")
+                    else:
+                        self.logger.debug(f"Gesture config for {gesture_name} not yet available (may be queued for LLM)")
+            except Exception as e:
+                self.logger.error(f"Error preloading gesture config for {gesture_name}: {e}")
+    
+    def _get_gesture_config(self, gesture_name: str, retry: bool = True):
+        """Get gesture config using centralized config manager
+        
+        Args:
+            gesture_name: Name of gesture (e.g., 'wave', 'smile', 'thumbs_up', 'peace', etc.)
+            retry: If True, attempt to load if not found (default: True)
+            
+        Returns:
+            Gesture config dict or None if not available
+        """
+        # Try centralized config manager first
+        config = self.config_manager.get_gesture_config(gesture_name)
+        if config:
+            return config
+        
+        # Fallback to legacy method for backward compatibility
+        if gesture_name in self.gesture_configs:
+            return self.gesture_configs[gesture_name]
+        
+        if not retry:
+            return None
+        
+        # Try LLM handler as fallback
+        try:
+            trigger = self.llm_command_handler.get_gesture_trigger(gesture_name)
+            if trigger:
+                self.gesture_configs[gesture_name] = trigger
+                # Also save to config manager
+                self.config_manager.save_gesture_config(gesture_name, trigger)
+                self.logger.info(f"Loaded gesture config for: {gesture_name}")
+                return trigger
+        except Exception as e:
+            self.logger.error(f"Error loading gesture config for {gesture_name}: {e}")
+        
+        return None
+    
+    def _get_wave_config(self):
+        """Get wave gesture config with guaranteed fallback
+        
+        Returns:
+            Gesture config dict, or None if not available (caller should handle gracefully)
+        """
+        config = self._get_gesture_config('wave', retry=True)
+        if not config:
+            # Try one more time without rate limiting if this is critical
+            try:
+                config = self.llm_command_handler.get_gesture_trigger('wave')
+                if config:
+                    self.gesture_configs['wave'] = config
+                    return config
+            except Exception:
+                pass
+        return config
+    
+    def _get_wave_text_config(self):
+        """Get wave text_scroller config with fallback
+        
+        Returns:
+            Tuple of (text: str, wobble: float) with fallback values
+        """
+        gesture_config = self._get_wave_config()
+        if gesture_config and gesture_config.get('text_scroller'):
+            text = gesture_config['text_scroller'].get('text', 'hai')
+            wobble = gesture_config['text_scroller'].get('wobble_amount', 0.0)
+            return text, wobble
+        return 'hai', 0.0
+    
+    def _calculate_wave_duration(self, gesture_config=None):
+        """Calculate total duration for wave status (video + text scroll)
+        
+        Args:
+            gesture_config: Optional gesture config (will be fetched if None)
+            
+        Returns:
+            Total duration in seconds
+        """
+        if gesture_config is None:
+            gesture_config = self._get_wave_config()
+        
+        video_duration = 0.0
+        if self.video_manager.has_video('hand_waving'):
+            video_duration = self.video_manager.get_duration('hand_waving')
+        
+        scroll_time = 0.0
+        if gesture_config and gesture_config.get('text_scroller'):
+            text = gesture_config['text_scroller'].get('text', '')
+            if text:
+                scroll_time = self._calculate_scroll_time(text)
+        
+        # Total duration: video + buffer + text scroll + extra buffer to ensure complete scroll
+        # The extra buffer ensures text fully scrolls off screen before status ends
+        if video_duration > 0:
+            return video_duration + 0.5 + scroll_time + 1.0  # Extra buffer for text completion
+        elif scroll_time > 0:
+            return scroll_time + 1.0  # Extra buffer for text completion
+        else:
+            return 2.0
+    
+    def _calculate_scroll_time(self, text: str, scroll_speed: float = 20.0) -> float:
+        """Calculate scroll time based on text length
+        
+        Args:
+            text: Text to calculate scroll time for
+            scroll_speed: Pixels per second (default: 20.0)
+            
+        Returns:
+            Scroll time in seconds
+        """
+        if not text:
+            return 1.0
+        
+        # Get text pixel map to calculate width
+        pixel_map = self.text_scroller._text_to_pixel_map(text, font_size_scale=1.0)
+        if not pixel_map:
+            return 1.0
+        
+        # Calculate text bounds
+        min_x = min(px for px, py in pixel_map)
+        max_x = max(px for px, py in pixel_map)
+        text_width = max_x - min_x
+        
+        # Calculate scroll distance (same logic as text_scroller)
+        start_x = self.width + 1 - min_x
+        exit_padding = max(text_width * 0.8, 15)  # Padding for clean exit
+        end_x = -min_x - exit_padding
+        scroll_distance = start_x - end_x
+        
+        # Calculate scroll time
+        if scroll_distance <= 0:
+            return 1.0  # Fallback to prevent division by zero
+        
+        scroll_time = scroll_distance / scroll_speed
+        return scroll_time
+    
+    def _calculate_status_duration(self, status: str, gesture_config = None, 
+                                   video_name = None, 
+                                   is_text_scroller_substate: bool = False,
+                                   video_buffer: float = 0.5, 
+                                   text_buffer: float = 0.5,
+                                   default_duration: float = 2.0) -> float:
+        """Calculate duration for a status based on video and text scrolling
+        
+        Args:
+            status: Status name (e.g., 'wave', 'smile', 'thumbs_up')
+            gesture_config: Optional gesture configuration dict
+            video_name: Optional video name (if different from status, e.g., 'hand_waving' for 'wave')
+            is_text_scroller_substate: If True, only calculate text scroll time (no video)
+            video_buffer: Buffer time to add after video (default: 0.5s)
+            text_buffer: Buffer time to add after text scroll (default: 0.5s)
+            default_duration: Default duration if no video/text (default: 2.0s)
+            
+        Returns:
+            Calculated duration in seconds
+        """
+        # Determine video name
+        if video_name is None:
+            video_name = status
+        
+        # Calculate scroll time from text_scroller config if available
+        scroll_time = 0.0
+        if gesture_config and gesture_config.get('text_scroller'):
+            text = gesture_config['text_scroller'].get('text', '')
+            if text:
+                scroll_time = self._calculate_scroll_time(text)
+        
+        # If this is a text_scroller substate, only return text scroll time
+        if is_text_scroller_substate:
+            return scroll_time + text_buffer if scroll_time > 0 else default_duration
+        
+        # Get video duration
+        video_duration = 0.0
+        if self.video_manager.has_video(video_name):
+            video_duration = self.video_manager.get_duration(video_name)
+        
+        # Combine video and text durations
+        if video_duration > 0:
+            # Video exists: video + buffer + text scroll + buffer
+            return video_duration + video_buffer + scroll_time + text_buffer
+        elif scroll_time > 0:
+            # No video but has text: text scroll + buffer
+            return scroll_time + text_buffer
+        else:
+            # No video and no text: default duration
+            return default_duration
+    
+    def _load_gesture_configs(self):
+        """Load all gesture trigger configurations from LLM (can be slow)"""
+        for trigger in self.llm_command_handler.get_gesture_triggers():
+            gesture_name = trigger.get('gesture')
+            if gesture_name:
+                self.gesture_configs[gesture_name] = trigger
+    
+    def _load_tts_triggers(self):
+        """Load TTS trigger configurations from LLM (lazy load on first use)"""
+        if not self.tts_triggers or len(self.tts_triggers) == 0:
+            try:
+                self.tts_triggers = self.llm_command_handler.get_tts_triggers()
+                self.logger.info(f"Loaded {len(self.tts_triggers)} TTS trigger(s)")
+            except Exception as e:
+                self.logger.error(f"Failed to load TTS triggers: {e}")
+                self.tts_triggers = []
+                return
+        
+        # Initialize next TTS time if triggers exist
+        if self.tts_triggers:
+            trigger = self.tts_triggers[0]  # Use first trigger for now
+            trigger_type = trigger.get('type')
+            self.logger.info(f"Using TTS trigger type: {trigger_type}")
+            
+            if trigger_type == 'random':
+                interval_min = trigger.get('interval_min', 30.0)
+                interval_max = trigger.get('interval_max', 90.0)
+                initial_delay = random.uniform(interval_min, interval_max)
+                self.next_tts_time = time.time() + initial_delay
+                # Store trigger config for later use
+                self.tts_trigger_config = trigger
+                self.logger.info(f"Random trigger configured: {interval_min}-{interval_max}s intervals, first TTS in {initial_delay:.1f}s")
+            elif trigger_type == 'time':
+                interval = trigger.get('interval', 60.0)
+                self.next_tts_time = time.time() + interval
+                self.tts_trigger_config = trigger
+                self.logger.info(f"Time trigger configured: {interval}s intervals, first TTS in {interval:.1f}s")
+            else:
+                self.logger.warning(f"Unknown trigger type: {trigger_type}")
+                self.next_tts_time = None
+        else:
+            self.logger.warning("No TTS triggers found")
+            self.next_tts_time = None
+    
+    def enable_transitions(self):
+        """Enable automatic state transitions"""
+        self.state_manager.enable_transitions()
+    
+    def disable_transitions(self):
+        """Disable automatic state transitions"""
+        self.state_manager.disable_transitions()
+    
+    def clear_transition_rules(self):
+        """Clear all transition rules"""
+        self.state_manager.clear_transition_rules()
+    
+    def get_transition_rules(self):
+        """Get all current transition rules
+        
+        Returns:
+            List of transition rule dictionaries
+        """
+        return self.state_manager.get_transition_rules()
+    
+    def remove_transition_rule(self, index):
+        """Remove a transition rule by index
+        
+        Args:
+            index: Index of rule to remove
+        """
+        return self.state_manager.remove_transition_rule(index)
+    
+    def add_main_status(self, status):
+        """Add a status to the main statuses pool (for random selection)
+        
+        Args:
+            status: Status name to add
+        """
+        self.state_manager.add_main_status(status)
+    
+    def remove_main_status(self, status):
+        """Remove a status from the main statuses pool
+        
+        Args:
+            status: Status name to remove
+        """
+        self.state_manager.remove_main_status(status)
+    
+    def add_interactive_status(self, status):
+        """Add a status to the interactive statuses list
+        
+        Interactive statuses are temporary and don't participate in automatic transitions.
+        
+        Args:
+            status: Status name to add
+        """
+        self.state_manager.add_interactive_status(status)
+    
+    def get_state_info(self):
+        """Get comprehensive state information for debugging/monitoring
+        
+        Returns:
+            dict with current state, available transitions, cooldowns, and rules
+        """
+        with self.status_lock:
+            return self.state_manager.get_state_info(
+                current_status=self.current_status,
+                previous_status=self.previous_status,
+                status_start_time=self.status_start_time,
+                status_duration=self.status_duration,
+                status_substate=self.status_substate
+            )
+    
+    def reload_voice_commands(self):
+        """Reload voice command configuration (clear LLM cache to regenerate)"""
+        self.llm_command_handler.reload_config()
+        self._load_gesture_configs()
+        self._load_tts_triggers()
+        self.logger.info("Voice commands reloaded - LLM cache cleared")
+    
     def _handle_voice_command(self, text):
-        """Handle voice commands and change states accordingly"""
+        """Handle voice commands using LLM
+        
+        Args:
+            text: Text from speech-to-text
+        """
         if not text:
             return
         
-        text_lower = text.lower().strip()
-        print(f"[STT] Voice command received: {text}")
+        self.logger.info(f"Voice command received: {text}")
         
-        # Parse commands and change states
-        if "eye" in text_lower or "look" in text_lower:
-            print("[STT] Switching to eye status")
-            self.set_status('eye')
-        elif "people" in text_lower or "person" in text_lower or "outline" in text_lower:
-            print("[STT] Switching to people status")
-            self.set_status('people')
-        elif "wave" in text_lower or "hello" in text_lower or "hi" in text_lower:
-            print("[STT] Triggering wave animation")
-            self.set_status('wave', duration=5.0, substate='hand_waving')
+        # Process command through LLM handler
+        success, is_unknown = self.llm_command_handler.process_voice_command(text)
+        
+        if not success:
+            # Command not recognized - could log or provide feedback
+            self.logger.warning(f"Command not recognized: {text}")
+        elif is_unknown:
+            # Unknown command - trigger think status
+            self.logger.info(f"Unknown command detected, triggering think status: {text}")
+            
+            # Store the main status we'll return to
+            current_main_status = self.current_status
+            if current_main_status not in ['eye', 'people']:
+                # If in an interactive status, return to previous main status or eye
+                current_main_status = self.previous_status if self.previous_status in ['eye', 'people'] else 'eye'
+            
+            # Store the return status for think status
+            self.think_return_status = current_main_status
+            
+            # Set callback for when LLM response is ready
+            def handle_pending_llm_response(result, original_text):
+                if result is None:
+                    self.logger.warning(f"No LLM response for unknown command: {original_text}")
+                    # Store None result to indicate we should return to main status
+                    with self.pending_llm_lock:
+                        self.pending_llm_response = (None, original_text)
+                    # Check if we're still in think status, if so transition back
+                    current_status = self.get_status()
+                    if current_status == 'think':
+                        self.set_status(current_main_status, duration=None, force=True)
+                    return
+                
+                # Check if status has changed since we started thinking
+                # Don't transition if we're now in a different status (e.g., gesture triggered)
+                current_status = self.get_status()
+                if current_status not in ['think', current_main_status]:
+                    self.logger.info(f"Status changed during LLM processing ({current_status}), not applying LLM response")
+                    # Clear pending response since we won't apply it
+                    with self.pending_llm_lock:
+                        self.pending_llm_response = None
+                    return
+                
+                # Store the result - will be applied when think status completes or immediately if video done
+                with self.pending_llm_lock:
+                    self.pending_llm_response = (result, original_text)
+                
+                # If we're still in think status and video has finished, apply immediately
+                # Otherwise wait for think status to complete naturally
+                if current_status == 'think':
+                    status_info = self.get_status_info()
+                    elapsed = status_info['elapsed']
+                    video_duration = 0
+                    if self.video_manager.has_video('think'):
+                        video_duration = self.video_manager.get_duration('think')
+                    
+                    # If video is done, apply response immediately (but still show thinking text)
+                    if elapsed >= video_duration:
+                        self.logger.info(f"LLM response ready, will apply when think status completes: {original_text}")
+                        # Don't apply immediately - let think status complete naturally to show thinking text
+                        # The response will be applied when think status duration expires
+            
+            self.llm_command_handler.set_pending_command_callback(handle_pending_llm_response)
+            
+            # Calculate think status duration (video + thinking text)
+            video_duration = 0
+            if self.video_manager.has_video('think'):
+                video_duration = self.video_manager.get_duration('think')
+            thinking_text_duration = 10.0  # Show thinking text for up to 10 seconds
+            think_duration = video_duration + thinking_text_duration + 1.0 if video_duration > 0 else thinking_text_duration + 1.0
+            
+            # Trigger think status with duration
+            self.set_status('think', duration=think_duration, force=True)
     
     def _check_and_play_tts(self):
-        """Check if it's time to play TTS and play it"""
+        """Check if it's time to play TTS and play it based on config triggers"""
         if not self.audio_service:
+            return
+        
+        if not self.audio_service.tts_voice:
+            return
+        
+        if self.next_tts_time is None:
             return
         
         current_time = time.time()
         if current_time >= self.next_tts_time:
-            self.audio_service.speak(self.tts_message)
-            self.next_tts_time = current_time + random.uniform(
-                self.tts_interval_min, self.tts_interval_max
-            )
+            # Get response from trigger config
+            if hasattr(self, 'tts_trigger_config') and self.tts_trigger_config:
+                tts_message = self.tts_trigger_config.get('response')
+                if tts_message:
+                    self.logger.info(f"Playing scheduled TTS: {tts_message}")
+                    self.audio_service.speak(tts_message)
+                    
+                    # Schedule next TTS based on trigger config
+                    if self.tts_trigger_config.get('type') == 'random':
+                        interval_min = self.tts_trigger_config.get('interval_min', 30.0)
+                        interval_max = self.tts_trigger_config.get('interval_max', 90.0)
+                        next_interval = random.uniform(interval_min, interval_max)
+                        self.next_tts_time = current_time + next_interval
+                        self.logger.info(f"Next TTS scheduled in {next_interval:.1f}s")
+                    elif self.tts_trigger_config.get('type') == 'time':
+                        interval = self.tts_trigger_config.get('interval', 60.0)
+                        self.next_tts_time = current_time + interval
+                        self.logger.info(f"Next TTS scheduled in {interval:.1f}s")
+                else:
+                    self.logger.warning("No responses in trigger config")
+                    self.next_tts_time = None
+            else:
+                self.logger.warning("No trigger config available")
+                self.next_tts_time = None
     
     def _camera_loop(self):
         """Background thread for camera capture and face detection"""
@@ -594,55 +1291,54 @@ class DecompressionMode(WebsiteMode):
                 else:
                     frame_small = frame_rgb
                 
-                # Check service enable flags (from console UI if available)
-                # Get enabled status from console UI if it exists
-                # Default to enabled, but always check console UI if available
-                # This ensures console UI control is respected
+                # Check service enable flags from console UI
+                # Console UI is the source of truth for service enabled/disabled state
                 face_enabled = True
                 gesture_enabled = True
                 segmentation_enabled = True
                 
-                # Check if console UI has service control flags - ALWAYS check if available
-                # Console UI is the source of truth for service enabled/disabled state
-                if hasattr(self, '_console_ui_ref') and self._console_ui_ref:
+                if self._console_ui_ref:
                     console_ui = self._console_ui_ref
-                    if hasattr(console_ui, 'services') and console_ui.services:
-                        # Get enabled status from console UI - this is the source of truth
-                        # Always use the value from console UI, don't default
-                        face_service = console_ui.services.get('Face Detection')
-                        if face_service is not None:
-                            face_enabled = face_service.enabled
-                            # face_enabled is now set from console UI
-                        
-                        gesture_service = console_ui.services.get('Gesture Detection')
-                        if gesture_service is not None:
-                            gesture_enabled = gesture_service.enabled
-                        
-                        segmentation_service = console_ui.services.get('People Segmentation')
-                        if segmentation_service is not None:
-                            segmentation_enabled = segmentation_service.enabled
+                    face_service = console_ui.services.get('Face Detection')
+                    if face_service:
+                        face_enabled = face_service.enabled
+                    
+                    gesture_service = console_ui.services.get('Gesture Detection')
+                    if gesture_service:
+                        gesture_enabled = gesture_service.enabled
+                    
+                    segmentation_service = console_ui.services.get('People Segmentation')
+                    if segmentation_service:
+                        segmentation_enabled = segmentation_service.enabled
                 
                 # Smile uses face detector, so use face_enabled
                 smile_enabled = face_enabled
                 
                 # Detect faces (only if enabled, in eye status, and throttle)
-                if (face_enabled and self.face_detector_module and
-                    current_status == 'eye' and
+                if (face_enabled and current_status == 'eye' and
                     current_time - last_detection_time.get('face', 0) >= detection_intervals['face']):
                     self.face_detector_module.detect(frame_small)
                     last_detection_time['face'] = current_time
                 
                 # Detect people outlines (only if enabled, in people status, and throttle)
-                if (segmentation_enabled and self.mask_detector_module and
-                    current_status == 'people' and
+                if (segmentation_enabled and current_status == 'people' and
                     current_time - last_detection_time.get('people', 0) >= detection_intervals['people']):
                     self.mask_detector_module.detect(frame_small)
                     last_detection_time['people'] = current_time
+                    
+                    # Check if people segments were detected
+                    if self.mask_detector_module.has_mask():
+                        mask = self.mask_detector_module.get_mask()
+                        if mask is not None:
+                            # Check if mask has any non-zero pixels (people detected)
+                            if np.any(mask > 0):
+                                self.last_people_segment_time = current_time
+                                if self.people_mode_entered_time is None:
+                                    self.people_mode_entered_time = current_time
                 
                 # Queue frame for background gesture detection (non-blocking)
                 # This prevents gesture detection from blocking the camera loop
-                if (gesture_enabled and self.gesture_detector_module and
-                    current_status not in ['wave', 'thumbs_up', 'smile']):
+                if (gesture_enabled and current_status not in ['wave', 'thumbs_up', 'smile']):
                     if (current_time - last_detection_time.get('gesture', 0) >= detection_intervals['gesture']):
                         # Downscale frame further for gesture detection (much faster processing)
                         if gesture_process_height is None:
@@ -671,8 +1367,7 @@ class DecompressionMode(WebsiteMode):
                         last_detection_time['gesture'] = current_time
                 
                 # Detect smiles (only if enabled, not already in a gesture status, and throttle)
-                if (smile_enabled and self.face_detector_module and
-                    current_status not in ['wave', 'thumbs_up', 'smile']):
+                if (smile_enabled and current_status not in ['wave', 'thumbs_up', 'smile']):
                     if (current_time - last_detection_time.get('smile', 0) >= detection_intervals['smile']):
                         self.face_detector_module.detect_smile(frame_small, frame_timestamp_ms)
                         frame_timestamp_ms += int(detection_intervals['smile'] * 1000)  # Convert to ms
@@ -699,24 +1394,33 @@ class DecompressionMode(WebsiteMode):
                 
                 # Check if gesture detection is still enabled
                 gesture_enabled = True
-                if hasattr(self, '_console_ui_ref') and self._console_ui_ref:
+                if self._console_ui_ref:
                     console_ui = self._console_ui_ref
-                    if hasattr(console_ui, 'services') and console_ui.services:
-                        gesture_service = console_ui.services.get('Gesture Detection')
-                        if gesture_service is not None:
-                            gesture_enabled = gesture_service.enabled
+                    gesture_service = console_ui.services.get('Gesture Detection')
+                    if gesture_service:
+                        gesture_enabled = gesture_service.enabled
                 
                 # Only process if enabled
                 if gesture_enabled:
                     # Process gesture detection (this is CPU-intensive, runs in background)
                     # Prefer AI detection if available (more accurate), fallback to manual if needed
                     if self.gesture_detector_module.gesture_recognizer_available:
-                        # Use AI gesture recognizer (covers both wave and thumbs up)
+                        # Use AI gesture recognizer (covers wave, thumbs_up, peace, point)
                         self.gesture_detector_module.detect_ai(frame)
                     else:
                         # Fallback to manual detection if AI not available
                         self.gesture_detector_module.detect_wave(frame)
                         self.gesture_detector_module.detect_thumbs_up(frame)
+                    
+                    # Dynamically run detection for all registered gestures
+                    gesture_registry = getattr(self.gesture_detector_module, 'gesture_registry', {})
+                    for gesture_name, gesture_info in gesture_registry.items():
+                        detect_method = gesture_info.get('detect_method')
+                        if detect_method:
+                            try:
+                                detect_method(frame)
+                            except Exception as e:
+                                self.logger.warning(f"Error detecting {gesture_name}: {e}")
                 
                 # Mark task as done
                 self.gesture_queue.task_done()
@@ -727,17 +1431,13 @@ class DecompressionMode(WebsiteMode):
     
     def _update_face_position(self):
         """Update target face position from face detector module."""
-        if not self.face_detector_module:
-            return
-        
         # Check if face detection is enabled via console UI
         face_enabled = True  # Default to enabled
-        if hasattr(self, '_console_ui_ref') and self._console_ui_ref:
+        if self._console_ui_ref:
             console_ui = self._console_ui_ref
-            if hasattr(console_ui, 'services'):
-                face_service = console_ui.services.get('Face Detection')
-                if face_service:
-                    face_enabled = face_service.enabled
+            face_service = console_ui.services.get('Face Detection')
+            if face_service:
+                face_enabled = face_service.enabled
         
         # If face detection is disabled, clear position and return
         if not face_enabled:
@@ -765,15 +1465,126 @@ class DecompressionMode(WebsiteMode):
                     )
                 self.detected_faces = []
     
-    def set_status(self, status, duration=None, substate=None):
+    def _on_state_manager_status_change(self, old_status: str, new_status: str):
+        """Callback when state manager detects a status change
+        
+        Args:
+            old_status: Previous status
+            new_status: New status
+        """
+        print(f"[StateManager] Status change detected: {old_status} -> {new_status}")
+    
+    def _handle_voice_status_change(self, status: str) -> bool:
+        """Handle status change from voice command
+        
+        Args:
+            status: Status to change to
+            
+        Returns:
+            True if status was changed successfully
+        """
+        # Calculate duration for interactive statuses
+        duration = None
+        substate = None
+        
+        gesture_config = self._get_gesture_config(status)
+        
+        # Use status configuration to determine duration and substate
+        config = self.status_config.get(status)
+        if not config:
+            return self.set_status(status, duration=None, substate=None)
+        
+        # Determine substate
+        substate = None
+        if config.get('has_substates', False):
+            substate = config.get('default_substate')
+            if gesture_config and gesture_config.get('action'):
+                substate = gesture_config['action'].get('substate', substate)
+        
+        # Calculate duration using configuration
+        duration = self._calculate_status_duration(
+            status=status,
+            gesture_config=gesture_config,
+            video_name=config.get('video_name'),
+            video_buffer=config.get('video_buffer', 0.5),
+            text_buffer=config.get('text_buffer', 0.5)
+        )
+        
+        return self.set_status(status, duration=duration, substate=substate)
+    
+    def _handle_voice_tts(self, text: str):
+        """Handle TTS response from voice command
+        
+        Args:
+            text: Text to speak
+        """
+        if self.audio_service and self.audio_service.tts_voice:
+            print(f"[Voice Command TTS] Speaking: {text}")
+            self.audio_service.speak(text)
+        else:
+            print(f"[Voice Command TTS] TTS not available, would have spoken: {text}")
+    
+    def is_status_on_cooldown(self, status):
+        """Check if a status is currently on cooldown
+        
+        Args:
+            status: Status name to check
+            
+        Returns:
+            tuple: (is_on_cooldown: bool, remaining_time: float)
+                   If not on cooldown, remaining_time is 0.0
+        """
+        return self.state_manager.is_status_on_cooldown(status)
+    
+    def get_cooldown_info(self):
+        """Get cooldown information for all statuses
+        
+        Returns:
+            dict: Maps status -> {'remaining': float, 'cooldown': float, 'progress': float}
+                  progress is 0.0 (just started) to 1.0 (cooldown complete)
+        """
+        return self.state_manager.get_cooldown_info()
+    
+    def add_transition_rule(self, rule_type, **kwargs):
+        """Add a transition rule to the state management system
+        
+        Args:
+            rule_type: Type of rule - 'time', 'random', or 'interaction'
+            **kwargs: Rule-specific parameters (see StateManager.add_transition_rule)
+        """
+        self.state_manager.add_transition_rule(rule_type, **kwargs)
+    
+    def get_available_statuses(self, status_pool=None):
+        """Get list of statuses available for transition (not on cooldown)
+        
+        Args:
+            status_pool: Optional list of statuses to filter from. If None, uses all statuses.
+            
+        Returns:
+            List of status names that are not on cooldown
+        """
+        return self.state_manager.get_available_statuses(status_pool)
+    
+    def set_status(self, status, duration=None, substate=None, force=False):
         """Set the current status of decompression mode with robust state management
         
         Args:
             status: String status name ('eye', 'people', 'wave', etc.)
             duration: Optional duration in seconds (None = indefinite)
             substate: Optional sub-state for complex statuses (e.g., 'hand_waving', 'hai_text' for wave)
+            force: If True, bypass cooldown check (default: False)
+            
+        Returns:
+            bool: True if status was set, False if blocked by cooldown
         """
         with self.status_lock:
+            # Check cooldown (unless forcing or status hasn't changed)
+            if not force and self.current_status != status:
+                is_on_cooldown, remaining = self.is_status_on_cooldown(status)
+                if is_on_cooldown:
+                    print(f"Status '{status}' is on cooldown. {remaining:.1f}s remaining.")
+                    return False
+            
             # Exit previous status
             if self.current_status != status:
                 self._exit_status(self.current_status)
@@ -782,15 +1593,24 @@ class DecompressionMode(WebsiteMode):
             # Set new status
             self.current_status = status
             self.status_start_time = time.time()
-            self.status_duration = duration
             self.status_substate = substate
             
-            # Enter new status
+            # Record execution time for cooldown tracking
+            self.state_manager.record_status_execution(status)
+            
+            # Enter new status (this will set status_duration based on status type)
             self._enter_status(status, substate)
+            
+            # If duration was explicitly provided, use it (overrides _enter_status)
+            # Otherwise, _enter_status will have set the appropriate duration
+            if duration is not None:
+                self.status_duration = duration
             
             print(f"Decompression mode status changed to: {status}" + 
                   (f" (substate: {substate})" if substate else "") +
                   (f" (duration: {duration}s)" if duration else ""))
+            
+            return True
     
     def get_status(self):
         """Get the current status of decompression mode"""
@@ -813,57 +1633,92 @@ class DecompressionMode(WebsiteMode):
             }
     
     def _enter_status(self, status, substate=None):
-        """Handle status entry logic"""
-        if status == 'wave':
-            # Initialize wave animation
-            self.status_substate = substate or 'hand_waving'
-            self.status_start_time = time.time()
-            
-            # Set duration based on substate
+        """Handle status entry logic - uses status configuration"""
+        config = self.status_config.get(status)
+        if not config:
+            self.logger.warning(f"Unknown status: {status}")
+            return
+        
+        # Initialize common state
+        self.status_start_time = time.time()
+        
+        # Set substate based on config
+        if config.get('has_substates', False):
+            self.status_substate = substate or config.get('default_substate')
+        else:
+            self.status_substate = None
+        
+        # Special handling for people status
+        if status == 'people':
+            self.people_mode_entered_time = time.time()
+            self.last_people_segment_time = None
+        
+        # Special handling for raw status
+        if status == 'raw':
+            # Load sparse sketches if not already loaded
+            if not self.available_sparse_sketches:
+                self.available_sparse_sketches = self._load_all_sparse_sketches()
+                if self.available_sparse_sketches:
+                    self.logger.info(f"Loaded {len(self.available_sparse_sketches)} sparse sketches")
+                else:
+                    self.logger.warning("No sparse sketches found in sketches_sparse.txt")
+            # Select initial sketch
+            if self.available_sparse_sketches:
+                self.current_sparse_sketch = random.choice(self.available_sparse_sketches)
+                self.last_sparse_sketch_switch_time = time.time()
+                # Update Hydra URL with sketch
+                self._update_raw_hydra_url()
+            # Set duration to 10 minutes (600 seconds) for main statuses
+            self.status_duration = 600.0
+        elif status in ['eye', 'people']:
+            # Set duration to 10 minutes (600 seconds) for main statuses
+            self.status_duration = 600.0
+        elif status == 'wave':
+            # Wave status - use specialized helper methods
+            gesture_config = self._get_wave_config()
             if self.status_substate == 'hand_waving':
-                # Use video duration if available, otherwise default to 2s
-                if self.video_manager and self.video_manager.has_video('hand_waving'):
-                    video_duration = self.video_manager.get_duration('hand_waving')
-                    # Add a small buffer to ensure full playback
-                    self.status_duration = video_duration + 0.5 if video_duration > 0 else 2.0
+                # Calculate total duration (video + text scroll)
+                self.status_duration = self._calculate_wave_duration(gesture_config)
+            else:
+                # Text scroller substate - calculate text scroll time only
+                text, _ = self._get_wave_text_config()
+                if text:
+                    scroll_time = self._calculate_scroll_time(text)
+                    # Add buffer to ensure text fully scrolls off screen
+                    self.status_duration = scroll_time + 1.0
                 else:
                     self.status_duration = 2.0
-            else:
-                # hai_text phase
-                self.status_duration = 3.0
-        elif status == 'thumbs_up':
-            # Initialize thumbs up animation
-            self.status_substate = None
-            self.status_start_time = time.time()
-            # Use video duration if available
-            if self.video_manager and self.video_manager.has_video('thumbs_up'):
-                video_duration = self.video_manager.get_duration('thumbs_up')
-                # Add small buffer to ensure video plays fully
-                self.status_duration = video_duration + 0.2 if video_duration > 0 else 2.0
-            else:
-                self.status_duration = 2.0
-        elif status == 'smile':
-            # Initialize smile animation
-            self.status_substate = None
-            self.status_start_time = time.time()
-            # Use video duration if available, add time for scrolling text
-            if self.video_manager and self.video_manager.has_video('smile'):
-                video_duration = self.video_manager.get_duration('smile')
-                # Calculate scroll time based on text width
-                # Estimate: text width ~200px, scroll speed 20px/s = 10s, but we'll use 8s for safety
-                scroll_time = 8.0
-                self.status_duration = video_duration + scroll_time + 1.0 if video_duration > 0 else scroll_time + 1.0  # +1s buffer for full exit
-            else:
-                self.status_duration = 10.0  # Default: 2s video placeholder + 8s text
-            # Play TTS
-            if self.audio_service:
-                self.audio_service.speak("i see you smiling")
-        elif status == 'eye':
-            # Reset any gesture-specific state
-            self.status_substate = None
-        elif status == 'people':
-            # Reset any gesture-specific state
-            self.status_substate = None
+        elif status == 'think':
+            # Think status has custom duration calculation
+            video_duration = 0
+            if config['video_name'] and self.video_manager.has_video(config['video_name']):
+                video_duration = self.video_manager.get_duration(config['video_name'])
+            thinking_text_duration = config.get('thinking_text_duration', 10.0)
+            self.status_duration = video_duration + thinking_text_duration + config.get('text_buffer', 1.0)
+        else:
+            # Other gesture statuses - get config and calculate duration
+            gesture_config = self._get_gesture_config(status) if status in ['smile', 'thumbs_up'] else None
+            # Use general duration calculation
+            self.status_duration = self._calculate_status_duration(
+                status=status,
+                gesture_config=gesture_config,
+                video_name=config.get('video_name'),
+                video_buffer=config.get('video_buffer', 0.5),
+                text_buffer=config.get('text_buffer', 0.5)
+            )
+        
+        # Play TTS from config if available
+        if status == 'wave':
+            gesture_config = self._get_wave_config()
+        elif status in ['smile', 'thumbs_up']:
+            gesture_config = self._get_gesture_config(status)
+        else:
+            gesture_config = None
+            
+        if gesture_config:
+            tts_response = gesture_config.get('tts_response')
+            if tts_response and self.audio_service and self.audio_service.tts_voice:
+                self.audio_service.speak(tts_response)
     
     def _exit_status(self, status):
         """Handle status exit logic"""
@@ -872,7 +1727,7 @@ class DecompressionMode(WebsiteMode):
             self.status_substate = None
     
     def _update_status_transitions(self):
-        """Update status transitions and timeouts"""
+        """Update status transitions and timeouts using the state management system"""
         current_time = time.time()
         next_status = None
         
@@ -880,74 +1735,234 @@ class DecompressionMode(WebsiteMode):
         with self.status_lock:
             elapsed = current_time - self.status_start_time
             
-            # Handle timed statuses
+            # Check people detection timeout - switch to eye if no segments detected for 5 seconds
+            if self.current_status == 'people':
+                if self.last_people_segment_time is None:
+                    # No segments detected yet, check if timeout exceeded
+                    if self.people_mode_entered_time is not None:
+                        time_since_entered = current_time - self.people_mode_entered_time
+                        if time_since_entered >= self.people_timeout_seconds:
+                            # Timeout exceeded, switch to eye mode
+                            self.logger.info(f"People mode timeout: no segments detected for {time_since_entered:.1f}s, switching to eye")
+                            next_status = 'eye'
+                else:
+                    # Segments were detected, check if it's been too long since last detection
+                    time_since_last_segment = current_time - self.last_people_segment_time
+                    if time_since_last_segment >= self.people_timeout_seconds:
+                        # Timeout exceeded, switch to eye mode
+                        self.logger.info(f"People mode timeout: no segments detected for {time_since_last_segment:.1f}s, switching to eye")
+                        next_status = 'eye'
+            
+            # Handle timed statuses (animations that have durations)
             if self.status_duration and elapsed >= self.status_duration:
-                if self.current_status == 'wave':
+                if self.current_status == 'think':
+                    # Think status complete - check if LLM response is ready
+                    with self.pending_llm_lock:
+                        if self.pending_llm_response:
+                            result, original_text = self.pending_llm_response
+                            self.pending_llm_response = None
+                            # Execute LLM response (will set status via _execute_response)
+                            if result:
+                                self.logger.info(f"Applying LLM response after think status: {original_text}")
+                                # Release lock before calling set_status to avoid deadlock
+                                result_to_execute = result
+                                text_to_execute = original_text
+                            else:
+                                result_to_execute = None
+                                text_to_execute = None
+                        else:
+                            result_to_execute = None
+                            text_to_execute = None
+                    
+                    # Execute response outside lock to avoid deadlock
+                    if result_to_execute:
+                        self.llm_command_handler._execute_response(result_to_execute, text_to_execute)
+                        return  # Status will be set by _execute_response
+                    
+                    # No pending response or response already handled - return to main status
+                    main_status = self.think_return_status if self.think_return_status else (self.previous_status if self.previous_status in ['eye', 'people'] else 'eye')
+                    self.think_return_status = None  # Clear return status
+                    self.logger.info(f"Think status complete, returning to: {main_status}")
+                    next_status = main_status
+                    self.status_duration = None  # Clear duration
+                elif self.current_status == 'wave':
                     # Transition wave sub-states
                     if self.status_substate == 'hand_waving':
-                        # Move to hai_text phase
-                        self.status_substate = 'hai_text'
+                        # Move to text_scroller phase
+                        self.status_substate = 'text_scroller'
                         self.status_start_time = current_time
-                        self.status_duration = 3.0
-                        print("Wave animation: transitioning to 'hai' text")
-                    elif self.status_substate == 'hai_text':
-                        # Wave animation complete, return to previous status or default to eye
-                        # Ensure enough time for text to fully scroll off (scroll_time ~2.5s + buffer)
-                        if elapsed < 3.5:  # Give extra time for text to fully exit
-                            self.status_duration = 3.5
-                            next_status = None  # Don't transition yet
+                        # Calculate scroll time from text length (with buffer for complete scroll)
+                        text, _ = self._get_wave_text_config()
+                        if text:
+                            scroll_time = self._calculate_scroll_time(text)
+                            # Add extra buffer to ensure text fully scrolls off screen
+                            self.status_duration = scroll_time + 1.0
                         else:
-                            next_status = self.previous_status if self.previous_status else 'eye'
-                            print(f"Wave animation complete, returning to: {next_status}")
+                            self.status_duration = 2.0
+                        self.logger.info("Wave animation: transitioning to text scroller")
+                    elif self.status_substate == 'text_scroller' or self.status_substate == 'hai_text':
+                        # Wave animation complete, return to previous status or default to eye
+                        # Use state management system to determine next status
+                        transition_status = self.state_manager.evaluate_transitions(
+                            self.current_status, self.status_duration, self.status_start_time
+                        )
+                        next_status = transition_status if transition_status else (self.previous_status if self.previous_status else 'eye')
+                        self.logger.info(f"Wave animation complete, returning to: {next_status}")
+                        # Clear status_duration so the new status can have automatic transitions
+                        self.status_duration = None
                 else:
-                    # Other timed statuses - return to default
-                    next_status = 'eye'
+                    # Other timed statuses (smile, thumbs_up) - use state management to determine next
+                    transition_status = self.state_manager.evaluate_transitions(
+                        self.current_status, self.status_duration, self.status_start_time
+                    )
+                    next_status = transition_status if transition_status else (self.previous_status if self.previous_status else 'eye')
+                    self.logger.info(f"{self.current_status} animation complete, returning to: {next_status}")
+                    # Clear status_duration so the new status can have automatic transitions
+                    self.status_duration = None
             
-            # Handle automatic status transitions based on conditions
-            # (Detection flags are set by _detect_gestures_ai or _detect_hand_wave/_detect_thumbs_up)
+            # Evaluate automatic transitions (time-based, random) if not in a timed status
+            if not next_status and not self.status_duration:
+                next_status = self.state_manager.evaluate_transitions(
+                    self.current_status, self.status_duration, self.status_start_time
+                )
         
         # Apply status changes outside the lock to avoid deadlock
         if next_status:
-            self.set_status(next_status)
+            # When returning to a previous status after animation, bypass cooldown
+            # But respect cooldowns for new transitions
+            force = (next_status == self.previous_status)
+            # Don't pass duration=None - let _enter_status set the correct duration for main statuses
+            # For main statuses (eye, people, raw), duration will be set to 600s in _enter_status
+            # For interactive statuses, duration will be calculated based on video/text
+            self.set_status(next_status, duration=None, force=force)
         else:
             # Check for detected gestures via gesture detector module
             gesture_triggered = False
             
-            if self.gesture_detector_module:
-                # Check thumbs up
-                if self.gesture_detector_module.get_thumbs_up_detected():
-                    duration = None
-                    if self.video_manager and self.video_manager.has_video('thumbs_up'):
-                        video_duration = self.video_manager.get_duration('thumbs_up')
-                        if video_duration > 0:
-                            duration = video_duration + 0.2
-                    self.set_status('thumbs_up', duration=duration)
-                    gesture_triggered = True
+            # Check thumbs up
+            if self.gesture_detector_module.get_thumbs_up_detected():
+                duration = None
+                if self.video_manager.has_video('thumbs_up'):
+                    video_duration = self.video_manager.get_duration('thumbs_up')
+                    if video_duration > 0:
+                        duration = video_duration + 0.2
+                # Check cooldown before triggering (silently skip if on cooldown)
+                is_on_cooldown, _ = self.is_status_on_cooldown('thumbs_up')
+                if not is_on_cooldown:
+                    success = self.set_status('thumbs_up', duration=duration)
+                    if success:
+                        gesture_triggered = True
+            
+            # Check for wave gesture (only if not already in wave status)
+            if self.current_status != 'wave' and self.gesture_detector_module.get_wave_detected():
+                # Get wave config
+                gesture_config = self._get_wave_config()
                 
-                # Check for wave gesture
-                if self.gesture_detector_module.get_wave_detected():
-                    duration = None
-                    if self.video_manager and self.video_manager.has_video('hand_waving'):
-                        video_duration = self.video_manager.get_duration('hand_waving')
-                        if video_duration > 0:
-                            # Calculate duration for hai_text scrolling
-                            # Estimate: "HAI" text width ~100px, scroll speed 20px/s = 5s, add buffer
-                            hai_scroll_time = 5.0 + 1.0  # Scroll time + buffer for full exit
-                            duration = video_duration + 0.5 + hai_scroll_time
-                    self.set_status('wave', duration=duration, substate='hand_waving')
-                    gesture_triggered = True
+                # Calculate duration using helper method
+                duration = self._calculate_wave_duration(gesture_config)
+                
+                # Check cooldown before triggering (silently skip if on cooldown)
+                is_on_cooldown, remaining_cooldown = self.is_status_on_cooldown('wave')
+                if not is_on_cooldown:
+                    # Determine substate from config
+                    substate = 'hand_waving'
+                    if gesture_config and gesture_config.get('action'):
+                        substate = gesture_config['action'].get('substate', 'hand_waving')
+                    
+                    success = self.set_status('wave', duration=duration, substate=substate)
+                    if success:
+                        gesture_triggered = True
+                        self.logger.info(f"Wave gesture triggered, transitioning to wave status (duration: {duration:.1f}s)")
+                    else:
+                        self.logger.warning(f"Wave gesture detected but set_status failed")
+                else:
+                    self.logger.debug(f"Wave gesture detected but on cooldown ({remaining_cooldown:.1f}s remaining), skipping")
             
             # Check for smile detection
-            if self.face_detector_module and self.face_detector_module.get_smile_detected():
+            if self.face_detector_module.get_smile_detected():
+                gesture_config = self._get_gesture_config('smile')
                 duration = None
-                if self.video_manager and self.video_manager.has_video('smile'):
+                scroll_time = 0
+                if gesture_config and gesture_config.get('text_scroller'):
+                    text = gesture_config['text_scroller'].get('text', '')
+                    if text:
+                        scroll_time = self._calculate_scroll_time(text)
+                
+                if self.video_manager.has_video('smile'):
                     video_duration = self.video_manager.get_duration('smile')
                     if video_duration > 0:
-                        scroll_time = 8.0  # Time for text to scroll
-                        duration = video_duration + scroll_time + 1.0  # +1s buffer for full exit
-                self.set_status('smile', duration=duration)
-                self.face_detector_module.reset_smile_detected()
-                gesture_triggered = True
+                        duration = video_duration + scroll_time + 0.5
+                    else:
+                        duration = scroll_time + 0.5 if scroll_time > 0 else 2.0
+                else:
+                    duration = scroll_time + 0.5 if scroll_time > 0 else 2.0
+                # Check cooldown before triggering (silently skip if on cooldown)
+                is_on_cooldown, _ = self.is_status_on_cooldown('smile')
+                if not is_on_cooldown:
+                    success = self.set_status('smile', duration=duration)
+                    if success:
+                        self.face_detector_module.reset_smile_detected()
+                        gesture_triggered = True
+                else:
+                    # Reset smile detected flag even if on cooldown to prevent spam
+                    self.face_detector_module.reset_smile_detected()
+            
+            # Check for new gesture detections
+            self._handle_gesture_detections()
+    
+    def _handle_gesture_detections(self):
+        """Handle all gesture detections dynamically using gesture registry"""
+        if not self.gesture_detector_module:
+            return
+        
+        # Get registered gestures from detector
+        gesture_registry = getattr(self.gesture_detector_module, 'gesture_registry', {})
+        
+        # Also check config manager for all available gestures (includes gestures without detection)
+        all_gestures = set(self.config_manager.get_available_gestures())
+        all_gestures.update(gesture_registry.keys())
+        
+        for gesture_name in all_gestures:
+            # Skip if already in this status
+            if self.current_status == gesture_name:
+                continue
+            
+            # Get detection method from registry if available
+            gesture_info = gesture_registry.get(gesture_name, {})
+            get_method = gesture_info.get('get_method')
+            
+            # Check if gesture was detected
+            detected = False
+            if get_method:
+                try:
+                    detected = get_method()
+                except Exception as e:
+                    self.logger.warning(f"Error checking {gesture_name} detection: {e}")
+                    continue
+            
+            if detected:
+                # Get gesture config
+                gesture_config = self._get_gesture_config(gesture_name)
+                
+                # Calculate duration
+                config = self.status_config.get(gesture_name, {})
+                video_name = config.get('video_name')
+                duration = self._calculate_status_duration(
+                    status=gesture_name,
+                    gesture_config=gesture_config,
+                    video_name=video_name,
+                    video_buffer=config.get('video_buffer', 0.2),
+                    text_buffer=config.get('text_buffer', 0.5)
+                )
+                
+                # Check cooldown
+                is_on_cooldown, remaining_cooldown = self.is_status_on_cooldown(gesture_name)
+                if not is_on_cooldown:
+                    success = self.set_status(gesture_name, duration=duration)
+                    if success:
+                        self.logger.info(f"{gesture_name} gesture triggered (duration: {duration:.1f}s)")
+                else:
+                    self.logger.debug(f"{gesture_name} gesture detected but on cooldown ({remaining_cooldown:.1f}s remaining)")
     
     def add_action_video(self, action_name, video_filename):
         """Add a new action video dynamically
@@ -967,9 +1982,7 @@ class DecompressionMode(WebsiteMode):
             del self.video_max_frames[action_name]
         
         # Load via video manager
-        if self.video_manager:
-            return self.video_manager.load_video(action_name, video_filename)
-        return False
+        return self.video_manager.load_video(action_name, video_filename)
     
     def _render_action_video(self, action_name, elapsed):
         """Render Hydra visual masked by video intensity
@@ -984,8 +1997,8 @@ class DecompressionMode(WebsiteMode):
         Returns:
             PIL Image of the masked visual, or black screen if video/visual not available
         """
-        # Check if video manager is available
-        if not self.video_manager or not self.video_manager.has_video(action_name):
+        # Check if video exists
+        if not self.video_manager.has_video(action_name):
             return Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
         
         # Get Hydra visual (already updated in main update() loop)
@@ -1067,17 +2080,18 @@ class DecompressionMode(WebsiteMode):
         return Image.fromarray(masked_visual)
     
     def _render_wave_status(self):
-        """Render the wave status (hand wave and 'hai' text animation)"""
+        """Render the wave status (hand wave and text animation)"""
         status_info = self.get_status_info()
         elapsed = status_info['elapsed']
         substate = status_info['substate']
         
         if substate == 'hand_waving':
             return self._render_waving_hand(elapsed)
-        elif substate == 'hai_text':
-            # Use scrolling text for "hai" - elapsed is time since hai_text substate started
-            # The substate starts after the video, so elapsed is already the correct time for scrolling
-            return self._render_scrolling_text("hai", elapsed, wobble_amount=0.05)
+        elif substate == 'hai_text' or substate == 'text_scroller':
+            # Get text config (with fallback)
+            text, wobble = self._get_wave_text_config()
+            # Use scrolling text - elapsed is time since text_scroller substate started
+            return self._render_scrolling_text(text, elapsed, wobble_amount=wobble)
         else:
             # Default to hand_waving if substate not set
             return self._render_waving_hand(elapsed)
@@ -1092,14 +2106,78 @@ class DecompressionMode(WebsiteMode):
         elapsed = status_info['elapsed']
         return self._render_action_video('thumbs_up', elapsed)
     
+    def _render_gesture_status(self):
+        """Generic render method for gesture statuses (peace, heart, rock_on, etc.)"""
+        status_info = self.get_status_info()
+        elapsed = status_info['elapsed']
+        status = status_info['status']
+        
+        # Get gesture config
+        gesture_config = self._get_gesture_config(status)
+        
+        # Try to render video if available
+        config = self.status_config.get(status, {})
+        video_name = config.get('video_name')
+        
+        if video_name and self.video_manager.has_video(video_name):
+            # Render video
+            video_frame = self._render_action_video(video_name, elapsed)
+            if video_frame:
+                return video_frame
+        
+        # If no video or video complete, render text scroller if available
+        if gesture_config and gesture_config.get('text_scroller'):
+            text = gesture_config['text_scroller'].get('text', '')
+            wobble = gesture_config['text_scroller'].get('wobble_amount', 0.0)
+            if text:
+                return self._render_scrolling_text(text, elapsed, wobble_amount=wobble)
+        
+        # Fallback: return black frame
+        return Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
+    
+    def _render_think_status(self):
+        """Render the think status with video and thinking text"""
+        status_info = self.get_status_info()
+        elapsed = status_info['elapsed']
+        
+        # Get video duration
+        video_duration = 0
+        if self.video_manager.has_video('think'):
+            video_duration = self.video_manager.get_duration('think')
+        
+        # Show video for first part, then thinking text
+        if elapsed < video_duration:
+            # Show video with intensity masking
+            return self._render_action_video('think', elapsed)
+        else:
+            # Show thinking text after video - decompression/burning man themed
+            text_elapsed = elapsed - video_duration
+            # Rotate through different thinking messages
+            thinking_texts = [
+                "processing...",
+                "thinking...",
+                "decompressing...",
+                "the playa provides...",
+                "considering...",
+                "reflecting...",
+                "wandering...",
+                "exploring...",
+            ]
+            # Cycle through texts based on elapsed time
+            text_index = int(text_elapsed / 1.5) % len(thinking_texts)
+            text = thinking_texts[text_index]
+            return self._render_scrolling_text(text, text_elapsed, wobble_amount=0.0)
+    
     def _render_smile_status(self):
         """Render the smile status with video and scrolling text"""
         status_info = self.get_status_info()
         elapsed = status_info['elapsed']
         
+        gesture_config = self._get_gesture_config('smile')
+        
         # Get video duration to determine when to show text
         video_duration = 0
-        if self.video_manager and self.video_manager.has_video('smile'):
+        if self.video_manager.has_video('smile'):
             video_duration = self.video_manager.get_duration('smile')
         
         # Show video for first part, then scrolling text
@@ -1107,25 +2185,41 @@ class DecompressionMode(WebsiteMode):
             # Show video with intensity masking
             return self._render_action_video('smile', elapsed)
         else:
-            # Show scrolling text after video
+            # Show scrolling text after video - use config, no hardcoded defaults
             text_elapsed = elapsed - video_duration
-            return self._render_scrolling_text("i see you smiling", text_elapsed, wobble_amount=0.05)
+            if gesture_config and gesture_config.get('text_scroller'):
+                text = gesture_config['text_scroller'].get('text', 'i see you smiling')
+                wobble = gesture_config['text_scroller'].get('wobble_amount', 0.0)  # Default to 0 (disabled)
+            else:
+                # Fallback only if config not available (shouldn't happen with CSV)
+                self.logger.warning("Smile gesture config missing text_scroller, using fallback")
+                text = 'i see you smiling'
+                wobble = 0.0  # Disabled
+            return self._render_scrolling_text(text, text_elapsed, wobble_amount=wobble)
     
     def _render_scrolling_text(self, text: str, elapsed: float, wobble_amount=1.0):
         """Render scrolling text that moves across the screen with wobbly effects.
+        
+        Uses the Hydra visual as a color source, so text pixels sample colors from the visual.
         
         Args:
             text: Text to display
             elapsed: Elapsed time since text started (seconds)
             wobble_amount: Amount of wobbling effect (default: 1.0)
         """
+        # Get Hydra visual to use as color source
+        hydra_frame = None
+        with self.hydra_frame_lock:
+            hydra_frame = self.hydra_frame
+        
         return self.text_scroller.render_scrolling_text(
             text=text,
             elapsed=elapsed,
             scroll_speed=20.0,
             wobble_amount=wobble_amount,
             font_size_scale=1.0,
-            base_color=(255, 255, 255)  # White text
+            base_color=(255, 255, 255),  # Fallback to white if no hydra visual
+            color_source=hydra_frame  # Use hydra visual as color source
         )
     def _update_hydra_frame(self):
         """Update the cached frame from Hydra"""
@@ -1203,16 +2297,15 @@ class DecompressionMode(WebsiteMode):
         # Add some space between eye and background
         gradient_start = eye_edge + 0.2  # Start gradient 0.2 units outside eye
         gradient_end = eye_edge + 1.5    # Full intensity 1.5 units outside
-        gradient_max = 0.8  # Maximum gradient intensity (80% max brightness)
         
         if dist_from_center < gradient_start:
             return 0.0
         elif dist_from_center > gradient_end:
-            return gradient_max
+            return 1.0  # Full brightness
         else:
-            # Linear gradient up to max
+            # Linear gradient up to full brightness
             gradient = (dist_from_center - gradient_start) / (gradient_end - gradient_start)
-            return gradient * gradient_max
+            return gradient
     
     def _get_circle_mask_value(self, nx, ny, dist_from_center, current_time):
         """Check if pixel is inside any translating circle and return mask value
@@ -1364,16 +2457,12 @@ class DecompressionMode(WebsiteMode):
         # Get current status
         status = self.get_status()
         
-        # Route to appropriate render method based on status
-        if status == 'wave':
-            return self._render_wave_status()
-        elif status == 'thumbs_up':
-            return self._render_thumbs_up_status()
-        elif status == 'smile':
-            return self._render_smile_status()
-        elif status == 'people':
-            return self._render_people_status()
-        else:  # Default to 'eye' status
+        # Route to appropriate render method based on status configuration
+        config = self.status_config.get(status)
+        if config and config.get('render_method'):
+            return config['render_method']()
+        else:
+            # Default to 'eye' status
             return self._render_eye_status()
     
     def _render_eye_status(self):
@@ -1394,6 +2483,58 @@ class DecompressionMode(WebsiteMode):
         
         return img
     
+    def _update_raw_hydra_url(self):
+        """Update Hydra URL with current sparse sketch"""
+        if not self.current_sparse_sketch:
+            return
+        
+        url = self.hydra_url
+        if '?' in url:
+            url += f"&sketch_id={urllib.parse.quote(self.current_sparse_sketch)}"
+        else:
+            url += f"?sketch_id={urllib.parse.quote(self.current_sparse_sketch)}"
+        
+        # Update the URL if driver is available
+        if self.driver:
+            try:
+                self.driver.get(url)
+                time.sleep(1)  # Wait for page to load
+            except Exception as e:
+                self.logger.error(f"Error updating raw Hydra URL: {e}")
+    
+    def _render_raw_status(self):
+        """Render the raw status - displays sparse sketches directly, switching every 1 minute"""
+        # Check if it's time to switch sketches
+        current_time = time.time()
+        if (self.last_sparse_sketch_switch_time is None or 
+            current_time - self.last_sparse_sketch_switch_time >= self.sparse_sketch_switch_interval):
+            
+            if self.available_sparse_sketches:
+                # Select a new sketch (different from current)
+                attempts = 0
+                new_sketch = random.choice(self.available_sparse_sketches)
+                while (new_sketch == self.current_sparse_sketch and 
+                       len(self.available_sparse_sketches) > 1 and 
+                       attempts < 10):
+                    new_sketch = random.choice(self.available_sparse_sketches)
+                    attempts += 1
+                
+                self.current_sparse_sketch = new_sketch
+                self.last_sparse_sketch_switch_time = current_time
+                self._update_raw_hydra_url()
+                self.logger.info(f"Switched to new sparse sketch")
+        
+        # Get frame from Hydra (already updated in update() method)
+        with self.hydra_frame_lock:
+            hydra_frame = self.hydra_frame
+        
+        if hydra_frame:
+            # Resize to match display dimensions
+            return hydra_frame.resize((self.width, self.height), Image.LANCZOS)
+        else:
+            # Return black frame if no Hydra frame available
+            return Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
+    
     def _render_people_status(self):
         """Render the people status using people masks as Hydra mask source"""
         # Hydra frame already updated in update() method
@@ -1403,34 +2544,35 @@ class DecompressionMode(WebsiteMode):
         pixels = np.array(img)
         
         # Get people mask from mask detector (thread-safe double buffering)
-        if not self.mask_detector_module:
-            return img
-        
         people_mask = self.mask_detector_module.get_mask()
         if people_mask is None:
             return img
         
         # Render Hydra visual masked by people outlines
-        # Use vectorized operations for better performance
-        for y in range(self.height):
-            for x in range(self.width):
-                # Get mask value at this pixel (0.0 to 1.0)
-                # Horizontally flip the mask (mirror effect)
-                flipped_x = self.width - 1 - x
-                mask_value = people_mask[y, flipped_x]
-                
-                # Convert pixel coordinates to normalized coordinates (-1 to 1)
-                nx = (x - self.width / 2) / (self.width / 2)
-                ny = (y - self.height / 2) / (self.height / 2)
-                
-                # Get Hydra color
-                hydra_color = self._get_hydra_texture_color(nx, ny, normalize_brightness=False)
-                
-                # Apply mask value to Hydra color (use full mask range, no threshold)
-                effect_color = np.array(hydra_color, dtype=float) * mask_value
-                pixels[y, x] = tuple(np.clip(effect_color, 0, 255).astype(np.uint8))
+        # Use vectorized operations for better performance (utilizes all CPU cores)
         
-        return Image.fromarray(pixels)
+        # Flip mask horizontally (mirror effect) using vectorized operation
+        flipped_mask = np.fliplr(people_mask)
+        
+        # Get Hydra frame as numpy array for faster access
+        with self.hydra_frame_lock:
+            hydra_frame = self.hydra_frame
+        
+        if hydra_frame is None:
+            return img
+        
+        # Resize Hydra frame to match target size and convert to numpy array
+        hydra_resized = hydra_frame.resize((self.width, self.height), Image.LANCZOS)
+        hydra_array = np.array(hydra_resized, dtype=np.float32)
+        
+        # Apply mask to all pixels at once (vectorized - uses all cores via NumPy)
+        # Expand mask to 3 channels for RGB multiplication
+        mask_3d = np.stack([flipped_mask] * 3, axis=-1)
+        
+        # Vectorized multiplication (NumPy will use multiple cores for large arrays)
+        masked_result = (hydra_array * mask_3d).astype(np.uint8)
+        
+        return Image.fromarray(masked_result)
     
     def _update_pupil_position(self):
         """Update pupil position based on detected face"""

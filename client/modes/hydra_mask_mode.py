@@ -28,9 +28,9 @@ class HydraMaskMode(WebsiteMode):
         # State management
         self.refresh_active = True
         
-        # Sketch saving - save to sketches.txt in same folder as this file
+        # Sketch saving - save to sketches_sparse.txt in same folder as this file
         script_dir = os.path.dirname(os.path.abspath(__file__))  # client/modes/
-        self.sketches_file = os.path.join(script_dir, "sketches.txt")
+        self.sketches_file = os.path.join(script_dir, "sketches_sparse.txt")
         
         # Frame analysis settings
         self.analysis_duration = 3.0  # Analyze frames for 3 seconds
@@ -125,7 +125,7 @@ class HydraMaskMode(WebsiteMode):
                 return None
     
     def _sketch_already_saved(self, sketch_value):
-        """Check if sketch is already in sketches.txt"""
+        """Check if sketch is already in sketches_sparse.txt"""
         if not os.path.exists(self.sketches_file):
             return False
         
@@ -138,9 +138,9 @@ class HydraMaskMode(WebsiteMode):
             return False
     
     def _save_sketch(self, sketch_value):
-        """Save sketch parameter to sketches.txt"""
+        """Save sketch parameter to sketches_sparse.txt"""
         try:
-            # Append to sketches.txt (one per line)
+            # Append to sketches_sparse.txt (one per line)
             with open(self.sketches_file, 'a', encoding='utf-8') as f:
                 f.write(f"{sketch_value}\n")
             

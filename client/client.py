@@ -537,7 +537,7 @@ if __name__ == '__main__':
             leds = simulation.Leds(40, 30)
         else:
             if WS2812_AVAILABLE:
-                leds = ws2812.Leds(40, 30, 0.5)  # 10% brightness (matching main branch)
+                leds = ws2812.Leds(40, 30, 0.1)  # 10% brightness (matching main branch)
             else:
                 print("WARNING: ws2812 hardware not available, falling back to simulation mode")
                 print("To use real hardware, ensure you're on a Raspberry Pi with required dependencies")

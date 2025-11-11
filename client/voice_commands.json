@@ -1,0 +1,195 @@
+{
+  "commands": [
+    {
+      "triggers": ["hello", "hi", "hey", "greetings", "what's up", "howdy"],
+      "action": {
+        "type": "status",
+        "status": "wave"
+      },
+      "responses": [
+        "hello beautiful human",
+        "hey there wanderer",
+        "greetings from the playa",
+        "what's up burner",
+        "hello you magical being"
+      ]
+    },
+    {
+      "triggers": ["eye", "look", "see", "watch", "gaze"],
+      "action": {
+        "type": "status",
+        "status": "eye"
+      },
+      "responses": [
+        "opening my eye for you",
+        "let me see you",
+        "eye mode activated",
+        "watching the playa",
+        "all eyes on you"
+      ]
+    },
+    {
+      "triggers": ["people", "person", "outline", "silhouette", "crowd"],
+      "action": {
+        "type": "status",
+        "status": "people"
+      },
+      "responses": [
+        "showing you the people",
+        "outlining the beautiful humans",
+        "people mode engaged",
+        "let's see who's here",
+        "highlighting the crowd"
+      ]
+    },
+    {
+      "triggers": ["what are you", "who are you", "what is this", "tell me about yourself"],
+      "action": {
+        "type": "tts_only"
+      },
+      "responses": [
+        "i'm decompression mode, an interactive art piece",
+        "i'm a digital eye watching the playa",
+        "i'm decompression, here to decompress with you",
+        "i'm an interactive installation at decompression",
+        "welcome to decompression mode"
+      ]
+    },
+    {
+      "triggers": ["thank you", "thanks", "appreciate it"],
+      "action": {
+        "type": "tts_only"
+      },
+      "responses": [
+        "you're welcome",
+        "happy to help",
+        "anytime burner",
+        "you're so welcome",
+        "glad to be here with you"
+      ]
+    },
+    {
+      "triggers": ["cool", "neat", "sweet", "amazing", "incredible"],
+      "action": {
+        "type": "tts_only"
+      },
+      "responses": [
+        "you're cool too",
+        "right back at you",
+        "thanks burner",
+        "you're amazing",
+        "we're all amazing here"
+      ]
+    },
+    {
+      "triggers": ["burning man", "playa", "black rock city", "brc"],
+      "action": {
+        "type": "tts_only"
+      },
+      "responses": [
+        "welcome to the playa",
+        "burning man is magical",
+        "black rock city vibes",
+        "the playa provides",
+        "welcome home"
+      ]
+    },
+    {
+      "triggers": ["decompression", "decomp"],
+      "action": {
+        "type": "tts_only"
+      },
+      "responses": [
+        "welcome to decompression",
+        "time to decompress",
+        "decompression mode activated",
+        "let's decompress together",
+        "welcome to decompression mode"
+      ]
+    },
+    {
+      "triggers": ["what can you do", "what do you do", "help", "commands"],
+      "action": {
+        "type": "tts_only"
+      },
+      "responses": [
+        "i can watch you, show people outlines, and respond to your gestures",
+        "try saying eye, people, wave, or smile",
+        "i respond to gestures and voice commands",
+        "wave at me, smile, or give me a thumbs up",
+        "interact with me through gestures or voice"
+      ]
+    }
+  ],
+  "gesture_triggers": [
+    {
+      "gesture": "wave",
+      "action": {
+        "type": "status",
+        "status": "wave",
+        "substate": "hand_waving"
+      },
+      "tts_responses": [
+        "hello beautiful",
+        "hey there",
+        "waving back at you",
+        "greetings wanderer"
+      ],
+      "text_scroller": {
+        "text": "hai",
+        "wobble_amount": 1.0,
+        "scroll_time": 5.0
+      }
+    },
+    {
+      "gesture": "thumbs_up",
+      "action": {
+        "type": "status",
+        "status": "thumbs_up"
+      },
+      "tts_responses": [
+        "thumbs up to you",
+        "that's radical",
+        "you're awesome",
+        "right on",
+        "hell yeah"
+      ],
+      "text_scroller": null
+    },
+    {
+      "gesture": "smile",
+      "action": {
+        "type": "status",
+        "status": "smile"
+      },
+      "tts_responses": [
+        "i see you smiling",
+        "your smile lights up the playa",
+        "that's a beautiful smile",
+        "smiles all around",
+        "radiating joy"
+      ],
+      "text_scroller": {
+        "text": "i see you smiling",
+        "wobble_amount": 0.05,
+        "scroll_time": 8.0
+      }
+    }
+  ],
+  "tts_triggers": [
+    {
+      "type": "random",
+      "interval_min": 30.0,
+      "interval_max": 90.0,
+      "responses": [
+        "welcome to decompression",
+        "welcome to decompression mode",
+        "time to decompress",
+        "let's decompress together"
+      ]
+    }
+  ],
+  "tts_output_device_index": null,
+  "similarity_threshold": 0.6,
+  "max_responses": 1
+}

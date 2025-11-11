@@ -4,6 +4,13 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Enable multi-threading for NumPy and OpenCV to utilize all CPU cores
+export OPENCV_NUM_THREADS=0  # 0 = use all available threads
+export OMP_NUM_THREADS=0  # OpenMP threads for NumPy (0 = all cores)
+export MKL_NUM_THREADS=0  # Intel MKL threads (0 = all cores)
+export NUMEXPR_NUM_THREADS=0  # NumExpr threads (0 = all cores)
+export VECLIB_MAXIMUM_THREADS=0  # Accelerate framework (macOS)
+
 # Kill any zombie processes that cause timing jitter
 pkill chromedriver 2>/dev/null
 
