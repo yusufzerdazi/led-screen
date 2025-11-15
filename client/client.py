@@ -526,6 +526,8 @@ if __name__ == '__main__':
         parser.add_argument('--test', type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument('--console', type=bool, action=argparse.BooleanOptionalAction, default=False,
                             help='Enable Kaleidoscape console UI for monitoring and debugging')
+        parser.add_argument('--stt', dest='enable_stt', type=bool, action=argparse.BooleanOptionalAction,
+                            default=True, help='Enable on-device speech-to-text (Whisper). Use --no-stt to skip.')
         args = parser.parse_args()
         
         server = args.server
@@ -537,7 +539,7 @@ if __name__ == '__main__':
             leds = simulation.Leds(40, 30)
         else:
             if WS2812_AVAILABLE:
-                leds = ws2812.Leds(40, 30, 0.1)  # 10% brightness (matching main branch)
+                leds = ws2812.Leds(40, 30, 1)  # 10% brightness (matching main branch)
             else:
                 print("WARNING: ws2812 hardware not available, falling back to simulation mode")
                 print("To use real hardware, ensure you're on a Raspberry Pi with required dependencies")
@@ -570,15 +572,23 @@ if __name__ == '__main__':
             print(f"Available modes: {', '.join(list_modes())}")
             exit(1)
         
+        # Allow CLI to override mode-specific features (e.g., speech-to-text)
+        if mode_name == 'decompression':
+            mode_config['enable_stt'] = args.enable_stt
+        
         # Set up and initialize mode
         mode.setup(**mode_config)
+
+        # Ensure runtime attribute override for modes that inspect enable_stt during init
+        if hasattr(mode, 'enable_stt') and 'enable_stt' in mode_config:
+            mode.enable_stt = mode_config['enable_stt']
         client.set_mode(mode)
 
         client.init()
         
-        # Set decompression mode to 'people' status for testing
+        # Ensure decompression mode starts in its configured base status
         if mode_name == 'decompression' and hasattr(mode, 'set_status'):
-            mode.set_status('people')
+            mode.set_status('people_kaleidoscope', is_base_status=True)
 
         # Start console UI if requested (after initialization)
         console_ui = None

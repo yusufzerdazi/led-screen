@@ -35,8 +35,8 @@ class HydraMaskMode(WebsiteMode):
         # Frame analysis settings
         self.analysis_duration = 3.0  # Analyze frames for 3 seconds
         self.analysis_interval = 0.1  # Sample every 100ms
-        self.dark_threshold = 20  # Percentage threshold for "dark" pixels
-        self.dark_pixel_brightness = 50  # Pixels below this brightness are considered "dark"
+        self.dark_threshold = 50  # Percentage threshold for "dark" pixels
+        self.dark_pixel_brightness = 20  # Pixels below this brightness are considered "dark"
         
         print(f"Sketches will be saved to: {os.path.abspath(self.sketches_file)}")
         print(f"Auto-judging sketches: saving if <{self.dark_threshold}% dark pixels")
@@ -266,7 +266,7 @@ class HydraMaskMode(WebsiteMode):
                 avg_dark_pct = self._analyze_sketch()
                 
                 # Decide whether to save
-                if avg_dark_pct < self.dark_threshold:
+                if avg_dark_pct > self.dark_threshold:
                     print(f"[SAVE] Sketch is bright enough ({avg_dark_pct:.1f}% < {self.dark_threshold}% dark), saving...")
                     if self._save_sketch(sketch_value):
                         print(f"[SUCCESS] Sketch saved successfully!")

@@ -1,0 +1,4 @@
+intent,example_phrases,response_json,audio_file,usage_count
+greeting,hello|hi|hey|greetings|howdy|what's up,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hello beautiful human"", ""text_scroller"": null}",,0
+eye,eye|look|see|watch|gaze|vision,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""opening my eye for you"", ""text_scroller"": null}",,0
+people,people|person|outline|silhouette|crowd,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""showing you the people"", ""text_scroller"": null}",,0

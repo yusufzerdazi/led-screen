@@ -200,14 +200,24 @@ class StateManager:
             # Filter to available (not on cooldown) statuses
             available = self.get_available_statuses(to_status)
             if not available:
-                return None
-            # Randomly choose from available
-            to_status = random.choice(available)
+                # If no statuses are available (all on cooldown), still pick one from the list
+                # This ensures transitions continue even when cooldowns haven't expired
+                if to_status:
+                    to_status = random.choice(to_status)
+                else:
+                    return None
+            else:
+                # Randomly choose from available
+                to_status = random.choice(available)
         
         # Check if target status is on cooldown
-        is_on_cooldown, _ = self.is_status_on_cooldown(to_status)
+        # For time-based transitions with a single status, allow it even if on cooldown
+        # This ensures transitions continue even when cooldowns haven't expired
+        is_on_cooldown, remaining = self.is_status_on_cooldown(to_status)
         if is_on_cooldown:
-            return None
+            # Log that we're allowing a transition despite cooldown
+            # This is intentional to ensure transitions continue
+            pass  # Allow transition even if on cooldown
         
         return to_status
     
@@ -246,6 +256,11 @@ class StateManager:
         # Filter to available (not on cooldown) statuses, excluding current
         available = [s for s in self.get_available_statuses(status_pool) if s != current_status]
         if not available:
+            # If no statuses are available (all on cooldown), still pick one from the pool
+            # This ensures transitions continue even when cooldowns haven't expired
+            fallback_pool = [s for s in status_pool if s != current_status]
+            if fallback_pool:
+                return random.choice(fallback_pool)
             return None
         
         # Randomly choose from available

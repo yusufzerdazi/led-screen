@@ -114,6 +114,10 @@ class FaceDetector:
         results = self.face_detector.process(frame)
         
         with self._lock:
+            # Reset face index if we're clearing the list (prevents stale index)
+            if not results.detections and self._detected_faces:
+                self._current_face_index = 0
+            
             self._detected_faces = []
             
             if results.detections:
@@ -134,6 +138,9 @@ class FaceDetector:
                 
                 # Update target position
                 if self._detected_faces:
+                    # Ensure current_face_index is within bounds (in case faces list changed)
+                    if self._current_face_index >= len(self._detected_faces):
+                        self._current_face_index = 0
                     target_face = self._detected_faces[self._current_face_index]
                     self._target_position = FacePosition(x=target_face.x, y=target_face.y)
             else:

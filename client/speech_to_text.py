@@ -274,8 +274,16 @@ class SpeechToText:
     def _process_audio_with_whisper(self, audio_data):
         """Process audio data using Whisper model"""
         try:
+            # Validate input data first
+            if not audio_data or len(audio_data) == 0:
+                return None
+            
             # Convert audio buffer to numpy array
-            audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+            try:
+                audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+            except (ValueError, TypeError) as e:
+                self.logger.debug(f"Invalid audio data format: {e}")
+                return None
             
             # Validate audio data
             if len(audio_np) == 0:
@@ -283,6 +291,7 @@ class SpeechToText:
             
             # Check for invalid values
             if np.any(np.isnan(audio_np)) or np.any(np.isinf(audio_np)):
+                self.logger.debug("Audio contains NaN or Inf values")
                 return None
             
             # Check if audio is all zeros (silence)
@@ -294,38 +303,62 @@ class SpeechToText:
             if audio_level < 0.001:  # Very quiet, likely noise
                 return None
             
-            # Whisper expects 16kHz, so resample if needed
-            if self.RATE != 16000:
-                try:
-                    import librosa
-                    audio_np = librosa.resample(audio_np, orig_sr=self.RATE, target_sr=16000)
-                except ImportError:
-                    # librosa not available, try with original rate
-                    pass
-                except Exception as e:
-                    # Resampling failed, try with original rate
-                    pass
-            
             # Ensure audio is not too short (Whisper needs at least ~0.5s)
-            if len(audio_np) < 8000:  # Less than 0.5s at 16kHz
+            min_samples = 8000  # 0.5s at 16kHz
+            if len(audio_np) < min_samples:
                 return None
             
+            # Whisper expects 16kHz, so resample if needed
+            target_rate = 16000
+            if self.RATE != target_rate:
+                try:
+                    import librosa
+                    audio_np = librosa.resample(audio_np, orig_sr=self.RATE, target_sr=target_rate)
+                    # Validate resampled audio
+                    if len(audio_np) == 0 or np.any(np.isnan(audio_np)) or np.any(np.isinf(audio_np)):
+                        return None
+                except ImportError:
+                    # librosa not available, skip resampling
+                    # Whisper can handle other rates, but 16kHz is optimal
+                    pass
+                except Exception as e:
+                    self.logger.debug(f"Resampling failed: {e}")
+                    return None
+            
+            # Final validation before Whisper call
+            if len(audio_np) < min_samples:
+                return None
+            
+            # Ensure audio is 1D array
+            if audio_np.ndim != 1:
+                audio_np = audio_np.flatten()
+            
+            # Initialize whisper_lock if not already done
+            if self.whisper_lock is None:
+                import threading
+                self.whisper_lock = threading.Lock()
+            
             # Transcribe using Whisper (with lock for thread safety)
-            if self.whisper_lock:
+            try:
                 with self.whisper_lock:
                     result = self.whisper_model.transcribe(
                         audio_np,
                         language=self.language,
                         task="transcribe",
-                        fp16=False  # Use FP32 to avoid NaN issues
+                        fp16=False,  # Use FP32 to avoid NaN issues
+                        verbose=False  # Reduce logging
                     )
-            else:
-                result = self.whisper_model.transcribe(
-                    audio_np,
-                    language=self.language,
-                    task="transcribe",
-                    fp16=False  # Use FP32 to avoid NaN issues
-                )
+            except (ValueError, RuntimeError, IndexError) as e:
+                # These are tensor shape/model errors - log but don't crash
+                error_msg = str(e)
+                if "reshape" in error_msg or "logits" in error_msg or "tensor" in error_msg.lower():
+                    self.logger.debug(f"Whisper tensor error (likely empty/invalid audio): {e}")
+                else:
+                    self.logger.warning(f"Whisper processing error: {e}")
+                return None
+            
+            if not result or "text" not in result:
+                return None
             
             text = result["text"].strip()
             
@@ -335,9 +368,14 @@ class SpeechToText:
             return None
             
         except Exception as e:
-            self.logger.error(f"Error processing audio with Whisper: {e}")
-            import traceback
-            traceback.print_exc()
+            # Only log unexpected errors, not tensor shape issues
+            error_msg = str(e)
+            if "reshape" in error_msg or "logits" in error_msg or "tensor" in error_msg.lower():
+                self.logger.debug(f"Whisper tensor error (likely empty/invalid audio): {e}")
+            else:
+                self.logger.error(f"Error processing audio with Whisper: {e}")
+                import traceback
+                traceback.print_exc()
             return None
     
     def _process_audio_with_sr(self, audio_data):

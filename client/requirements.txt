@@ -20,6 +20,10 @@ sounddevice
 SpeechRecognition
 openai-whisper
 
+# Intent-based command handler (alternative to LLM):
+transformers
+torch
+
 # Hardware-specific dependencies (not needed for simulation mode):
 # 
 # LED Hardware (Raspberry Pi only):

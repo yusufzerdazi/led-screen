@@ -6,6 +6,8 @@ Handles text-to-speech (Piper) and speech-to-text (Whisper) functionality.
 
 import os
 import sys
+import hashlib
+import pickle
 import numpy as np
 import sounddevice as sd
 from threading import Lock
@@ -46,6 +48,12 @@ class AudioService:
         from logger import get_logger
         self.logger_tts = get_logger("Audio (TTS)")
         self.logger_stt = get_logger("Audio (STT)")
+        
+        # Initialize TTS cache directory
+        cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tts_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        self.tts_cache_dir = cache_dir
+        self.logger_tts.info(f"TTS cache directory: {cache_dir}")
         
         # List available audio devices
         self._list_audio_devices()
@@ -224,6 +232,89 @@ class AudioService:
         if self._voice_command_callback:
             self._voice_command_callback(text)
     
+    def _get_cache_key(self, text: str) -> str:
+        """Generate cache key (filename) for TTS text.
+        
+        Args:
+            text: Text to generate cache key for
+            
+        Returns:
+            Cache key (filename without extension)
+        """
+        # Include voice model info in hash if available
+        voice_id = ""
+        if self.tts_voice and hasattr(self.tts_voice, 'config'):
+            # Try to get voice identifier from config
+            if hasattr(self.tts_voice.config, 'language'):
+                voice_id = str(self.tts_voice.config.language)
+            if hasattr(self.tts_voice.config, 'sample_rate'):
+                voice_id += f"_{self.tts_voice.config.sample_rate}"
+        
+        # Create hash from text + voice info
+        hash_input = f"{text}|{voice_id}".encode('utf-8')
+        hash_obj = hashlib.md5(hash_input)
+        return hash_obj.hexdigest()
+    
+    def _get_cache_path(self, text: str) -> str:
+        """Get cache file path for TTS text.
+        
+        Args:
+            text: Text to get cache path for
+            
+        Returns:
+            Full path to cache file
+        """
+        cache_key = self._get_cache_key(text)
+        return os.path.join(self.tts_cache_dir, f"{cache_key}.pkl")
+    
+    def _load_cached_audio(self, text: str) -> Optional[tuple]:
+        """Load cached TTS audio if available.
+        
+        Args:
+            text: Text to load cache for
+            
+        Returns:
+            Tuple of (audio_array, sample_rate) if found, None otherwise
+        """
+        cache_path = self._get_cache_path(text)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'rb') as f:
+                    cached_data = pickle.load(f)
+                    audio_array = cached_data['audio']
+                    sample_rate = cached_data['sample_rate']
+                    self.logger_tts.debug(f"Loaded cached TTS audio for: {text[:50]}...")
+                    return audio_array, sample_rate
+            except Exception as e:
+                self.logger_tts.warning(f"Error loading cached audio: {e}")
+                # Remove corrupted cache file
+                try:
+                    os.remove(cache_path)
+                except:
+                    pass
+        return None
+    
+    def _save_cached_audio(self, text: str, audio_array: np.ndarray, sample_rate: int) -> None:
+        """Save generated TTS audio to cache.
+        
+        Args:
+            text: Text that was synthesized
+            audio_array: Audio array (int16)
+            sample_rate: Sample rate in Hz
+        """
+        cache_path = self._get_cache_path(text)
+        try:
+            cached_data = {
+                'audio': audio_array,
+                'sample_rate': sample_rate,
+                'text': text  # Store text for debugging
+            }
+            with open(cache_path, 'wb') as f:
+                pickle.dump(cached_data, f)
+            self.logger_tts.debug(f"Cached TTS audio for: {text[:50]}...")
+        except Exception as e:
+            self.logger_tts.warning(f"Error saving cached audio: {e}")
+    
     def speak(self, text: str) -> None:
         """Generate and play TTS audio in a separate thread.
         
@@ -244,38 +335,47 @@ class AudioService:
                 self.tts_playing = True
             
             try:
-                self.logger_tts.debug("Starting TTS synthesis")
-                # Synthesize speech
-                audio_generator = self.tts_voice.synthesize(text)
-                
-                # Consume the generator to get audio bytes
-                audio_chunks = []
-                for audio_chunk in audio_generator:
-                    if hasattr(audio_chunk, 'audio_int16_bytes'):
-                        audio_chunks.append(audio_chunk.audio_int16_bytes)
-                    elif hasattr(audio_chunk, 'audio_bytes'):
-                        audio_chunks.append(audio_chunk.audio_bytes)
-                    elif isinstance(audio_chunk, bytes):
-                        audio_chunks.append(audio_chunk)
-                    else:
-                        audio_chunks.append(bytes(audio_chunk))
-                
-                # Combine all chunks
-                audio_data = b''.join(audio_chunks)
-                
-                # Get sample rate
-                sample_rate = self.tts_voice.config.sample_rate if hasattr(self.tts_voice.config, 'sample_rate') else 22050
-                
-                self.logger_tts.debug(f"TTS synthesized {len(audio_data)} bytes at {sample_rate}Hz")
-                
-                # Convert to numpy array
-                audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-                
-                # Apply reverb effect
-                audio_array = self._apply_reverb(audio_array, sample_rate)
-                
-                # Convert back to int16
-                audio_array = (np.clip(audio_array, -1.0, 1.0) * 32767.0).astype(np.int16)
+                # Check cache first
+                cached = self._load_cached_audio(text)
+                if cached:
+                    audio_array, sample_rate = cached
+                    self.logger_tts.info(f"Using cached TTS audio for: {text[:50]}...")
+                else:
+                    self.logger_tts.debug("Starting TTS synthesis")
+                    # Synthesize speech
+                    audio_generator = self.tts_voice.synthesize(text)
+                    
+                    # Consume the generator to get audio bytes
+                    audio_chunks = []
+                    for audio_chunk in audio_generator:
+                        if hasattr(audio_chunk, 'audio_int16_bytes'):
+                            audio_chunks.append(audio_chunk.audio_int16_bytes)
+                        elif hasattr(audio_chunk, 'audio_bytes'):
+                            audio_chunks.append(audio_chunk.audio_bytes)
+                        elif isinstance(audio_chunk, bytes):
+                            audio_chunks.append(audio_chunk)
+                        else:
+                            audio_chunks.append(bytes(audio_chunk))
+                    
+                    # Combine all chunks
+                    audio_data = b''.join(audio_chunks)
+                    
+                    # Get sample rate
+                    sample_rate = self.tts_voice.config.sample_rate if hasattr(self.tts_voice.config, 'sample_rate') else 22050
+                    
+                    self.logger_tts.debug(f"TTS synthesized {len(audio_data)} bytes at {sample_rate}Hz")
+                    
+                    # Convert to numpy array
+                    audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                    
+                    # Apply reverb effect
+                    audio_array = self._apply_reverb(audio_array, sample_rate)
+                    
+                    # Convert back to int16
+                    audio_array = (np.clip(audio_array, -1.0, 1.0) * 32767.0).astype(np.int16)
+                    
+                    # Save to cache for future use
+                    self._save_cached_audio(text, audio_array, sample_rate)
                 
                 # Play audio
                 self.logger_tts.info(f"Playing TTS audio: {text}")

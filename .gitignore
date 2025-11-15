@@ -16,6 +16,10 @@ client/.env
 *.png
 out/
 
+# TTS cache
+tts_cache/
+client/tts_cache/
+
 # IDE
 .vscode/
 .idea/
