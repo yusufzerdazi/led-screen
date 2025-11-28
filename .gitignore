@@ -13,7 +13,6 @@ client/.env
 
 # Media files
 *.wav
-*.png
 out/
 
 # TTS cache

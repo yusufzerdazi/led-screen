@@ -528,6 +528,10 @@ if __name__ == '__main__':
                             help='Enable Kaleidoscape console UI for monitoring and debugging')
         parser.add_argument('--stt', dest='enable_stt', type=bool, action=argparse.BooleanOptionalAction,
                             default=True, help='Enable on-device speech-to-text (Whisper). Use --no-stt to skip.')
+        parser.add_argument('--debug-overlay', dest='debug_overlay', action='store_true',
+                            help='Enable overlay mode permanently (masks visual with tush.png)')
+        parser.add_argument('--color-mode', dest='color_mode', type=int, default=1,
+                            help='Color transformation mode for mischief mode (1-4, default: 1). Use 0 to disable.')
         args = parser.parse_args()
         
         server = args.server
@@ -566,7 +570,15 @@ if __name__ == '__main__':
             mode_name = 'tush'
         
         # Create mode instance
-        mode = get_mode(mode_name, client.width, client.height)
+        mode_kwargs = {}
+        if mode_name in ['tush', 'music']:
+            mode_kwargs['debug_overlay'] = args.debug_overlay
+            print(f"[Client] Creating {mode_name} mode with debug_overlay={args.debug_overlay}")
+        elif mode_name == 'mischief':
+            mode_kwargs['color_mode'] = args.color_mode
+            print(f"[Client] Creating {mode_name} mode with color_mode={args.color_mode}")
+        
+        mode = get_mode(mode_name, client.width, client.height, **mode_kwargs)
         if not mode:
             print(f"Unknown mode: {mode_name}")
             print(f"Available modes: {', '.join(list_modes())}")

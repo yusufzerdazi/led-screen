@@ -306,6 +306,9 @@ class KaleidoscapeUI:
             'stop': self._cmd_stop_service,
             'enable': self._cmd_enable_service,
             'disable': self._cmd_disable_service,
+            'switch_visual': self._cmd_switch_visual,
+            'switch_color': self._cmd_switch_color,
+            'color_mode': self._cmd_switch_color,  # Alias
             'help': self._cmd_help,
         }
 
@@ -863,6 +866,78 @@ class KaleidoscapeUI:
             else:
                 self.log("UI", "ERROR", "Failed to trigger smile gesture")
 
+    def _cmd_switch_visual(self, *args):
+        """Switch to a different Hydra visual/sketch
+        
+        Usage:
+            switch_visual [sketch_name]
+            If sketch_name is provided, switches to that sketch (partial match allowed)
+            If omitted, chooses a random sketch
+        """
+        if not self.mode:
+            self.log("UI", "ERROR", "Mode not available")
+            return
+        
+        # Check if mode supports visual switching
+        if not hasattr(self.mode, 'switch_visual'):
+            self.log("UI", "ERROR", "Current mode does not support visual switching")
+            return
+        
+        # Join all args to handle sketch names with spaces
+        sketch_arg = ' '.join(args) if args else None
+        success = self.mode.switch_visual(sketch=sketch_arg)
+        
+        if success:
+            if sketch_arg:
+                self.log("UI", "INFO", f"Switched to sketch: {sketch_arg}")
+            else:
+                self.log("UI", "INFO", "Switched to random sketch")
+        else:
+            self.log("UI", "ERROR", "Failed to switch visual")
+    
+    def _cmd_switch_color(self, mode=None):
+        """Switch color transformation mode
+        
+        Usage:
+            switch_color <mode>
+            switch_color 1  - RGB interpolation mode
+            switch_color 2  - Closest color mode
+            switch_color 3  - Two color mode
+            switch_color 4  - TBD mode
+            switch_color 0  - Disable color transformation
+        """
+        if not self.mode:
+            self.log("UI", "ERROR", "Mode not available")
+            return
+        
+        # Check if mode supports color switching
+        if not hasattr(self.mode, 'set_color_mode'):
+            self.log("UI", "ERROR", "Current mode does not support color mode switching")
+            return
+        
+        if not mode:
+            self.log("UI", "ERROR", "Usage: switch_color <mode> (0-4)")
+            self.log("UI", "INFO", "Modes: 0=disabled, 1=RGB interpolation, 2=closest color, 3=two colors, 4=TBD")
+            return
+        
+        try:
+            mode_int = int(mode)
+            if mode_int < 0 or mode_int > 4:
+                self.log("UI", "ERROR", "Color mode must be between 0 and 4")
+                return
+            
+            self.mode.set_color_mode(mode_int)
+            mode_names = {
+                0: "disabled",
+                1: "RGB interpolation",
+                2: "closest color",
+                3: "two colors",
+                4: "TBD"
+            }
+            self.log("UI", "INFO", f"Color mode switched to {mode_int} ({mode_names.get(mode_int, 'unknown')})")
+        except ValueError:
+            self.log("UI", "ERROR", f"Invalid color mode: {mode}. Must be a number (0-4)")
+
     def _cmd_start_service(self, service_name: str = None):
         """Start a service"""
         if not service_name:
@@ -1019,6 +1094,14 @@ Examples:
   stop face               - Stop face detection
   enable gesture          - Enable gesture detection
   disable segmentation    - Disable people segmentation
+
+Visual Control (Mischief Mode):
+  switch_visual [sketch] - Switch to a different Hydra visual/sketch
+                           If sketch name is provided, switches to that sketch (partial match)
+                           If omitted, chooses a random sketch
+  switch_color <mode>     - Switch color transformation mode
+  color_mode <mode>       - Alias for switch_color
+                           Modes: 0=disabled, 1=RGB interpolation, 2=closest color, 3=two colors, 4=TBD
 
 Other:
   help                    - Show this help

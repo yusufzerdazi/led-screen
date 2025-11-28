@@ -11,6 +11,7 @@ from .dashboard_mode import DashboardMode
 from .decompression_mode import DecompressionMode
 from .hydra_mask_mode import HydraMaskMode
 from .light_test_mode import LightTestMode
+from .mischief_mode import MischiefMode
 
 # Mode registry - maps mode names to mode classes
 MODE_REGISTRY = {
@@ -22,9 +23,10 @@ MODE_REGISTRY = {
     'hydra_mask': HydraMaskMode,
     'mask': HydraMaskMode,  # Alias
     'light_test': LightTestMode,
+    'mischief': MischiefMode,
 }
 
-def get_mode(mode_name, width=256, height=144):
+def get_mode(mode_name, width=256, height=144, **kwargs):
     """
     Get a mode instance by name.
     
@@ -32,13 +34,14 @@ def get_mode(mode_name, width=256, height=144):
         mode_name: Name of the mode to instantiate
         width: Display width in pixels
         height: Display height in pixels
+        **kwargs: Additional arguments to pass to mode constructor
         
     Returns:
         Mode instance or None if mode not found
     """
     mode_class = MODE_REGISTRY.get(mode_name.lower())
     if mode_class:
-        return mode_class(width, height)
+        return mode_class(width, height, **kwargs)
     return None
 
 def list_modes():

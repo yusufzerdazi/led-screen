@@ -14,6 +14,7 @@ from threading import Thread, Lock
 from io import BytesIO
 import random
 import math
+import os
 
 from .website_mode import WebsiteMode
 
@@ -36,9 +37,20 @@ except ImportError:
 class TushMode(WebsiteMode):
     """Music visualizer mode using Hydra with audio-reactive shape masking"""
     
-    def __init__(self, width=40, height=30):
+    def __init__(self, width=40, height=30, debug_overlay=False):
         super().__init__(width, height)
         self.hydra_url = "http://localhost:5173"
+        
+        # Overlay mode
+        self.debug_overlay = debug_overlay
+        self.overlay_enabled = debug_overlay
+        self.overlay_image = None
+        self.overlay_mask = None
+        print(f"[TushMode] Initialized with debug_overlay={debug_overlay}, overlay_enabled={self.overlay_enabled}")
+        self._load_overlay()
+        
+        # Animation speed multiplier (1/5 = 0.2 for 5x slower)
+        self.animation_speed_multiplier = 0.2
         
         # FPS limiting for frame capture (configured by client)
         self.last_frame_time = 0
@@ -141,6 +153,78 @@ class TushMode(WebsiteMode):
         # Initialize shape positions
         self._initialize_shapes()
     
+    def _load_overlay(self):
+        """Load the overlay image (tush.png) and prepare it as a mask"""
+        try:
+            # Get the client folder path (assuming we're in client/modes/)
+            client_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            overlay_path = os.path.join(client_dir, 'tush.png')
+            
+            if os.path.exists(overlay_path):
+                self.overlay_image = Image.open(overlay_path)
+                print(f"Loaded overlay image from: {overlay_path}")
+                print(f"Overlay image size: {self.overlay_image.size}")
+            else:
+                print(f"Warning: Overlay image not found at: {overlay_path}")
+                self.overlay_image = None
+        except Exception as e:
+            print(f"Error loading overlay image: {e}")
+            self.overlay_image = None
+    
+    def _prepare_overlay_mask(self, target_width, target_height):
+        """Prepare overlay mask scaled to fill screen while maintaining aspect ratio, 10% smaller"""
+        if self.overlay_image is None:
+            return None
+        
+        try:
+            overlay_width, overlay_height = self.overlay_image.size
+            
+            # Calculate scale to fill screen (cover mode), then make it 10% smaller
+            scale_w = target_width / overlay_width
+            scale_h = target_height / overlay_height
+            scale = max(scale_w, scale_h) * 0.9  # 10% smaller (90% of fill size)
+            
+            # Calculate new dimensions
+            new_width = int(overlay_width * scale)
+            new_height = int(overlay_height * scale)
+            
+            # Resize overlay maintaining aspect ratio
+            resized_overlay = self.overlay_image.resize((new_width, new_height), Image.LANCZOS)
+            
+            # Create a black canvas of target size with alpha channel
+            canvas = Image.new('RGBA', (target_width, target_height), (0, 0, 0, 0))  # Transparent black
+            
+            # Center the resized overlay on the canvas
+            left = (target_width - new_width) // 2
+            top = (target_height - new_height) // 2
+            
+            # Ensure resized_overlay has alpha channel
+            if resized_overlay.mode != 'RGBA':
+                resized_overlay = resized_overlay.convert('RGBA')
+            
+            # Paste with alpha channel as mask
+            canvas.paste(resized_overlay, (left, top), resized_overlay)
+            
+            cropped_overlay = canvas
+            
+            # Convert to grayscale mask (alpha channel if available, otherwise convert to grayscale)
+            if cropped_overlay.mode == 'RGBA':
+                # Use alpha channel as mask
+                mask_array = np.array(cropped_overlay.split()[3])  # Get alpha channel
+                print(f"[TushMode] Overlay mask prepared: shape={mask_array.shape}, min={mask_array.min()}, max={mask_array.max()}, mean={mask_array.mean():.2f}")
+            else:
+                # Convert to grayscale and use as mask
+                mask_array = np.array(cropped_overlay.convert('L'))
+                print(f"[TushMode] Overlay mask prepared (grayscale): shape={mask_array.shape}, min={mask_array.min()}, max={mask_array.max()}, mean={mask_array.mean():.2f}")
+            
+            # Normalize to 0-1 range
+            mask_array = mask_array.astype(np.float32) / 255.0
+            
+            return mask_array
+        except Exception as e:
+            print(f"Error preparing overlay mask: {e}")
+            return None
+    
     def _initialize_shapes(self):
         """Initialize shape positions and sizes"""
         for i in range(self.num_shapes):
@@ -154,8 +238,12 @@ class TushMode(WebsiteMode):
             self.shape_sizes.append(size)
     
     def setup(self, **kwargs):
-        """Set up Hydra URL"""
+        """Set up Hydra URL and overlay mode"""
         self.url = kwargs.get('url', self.hydra_url)
+        # Allow debug_overlay to be set via setup
+        if 'debug_overlay' in kwargs:
+            self.debug_overlay = kwargs['debug_overlay']
+            self.overlay_enabled = kwargs['debug_overlay']
     
     def init(self):
         """Initialize Hydra and start audio/visualization threads"""
@@ -212,8 +300,15 @@ class TushMode(WebsiteMode):
             # Resize to LED dimensions
             frame = frame.resize((self.width, self.height), Image.LANCZOS)
             
-            # Apply shape masking with audio-reactive animations
-            frame = self.apply_shape_mask(frame)
+            # Apply overlay mask if enabled - skip shape masking in overlay mode
+            if self.overlay_enabled:
+                if self.overlay_image is None:
+                    print("[TushMode] Warning: overlay_enabled=True but overlay_image is None")
+                # In overlay mode, ONLY show the visual masked by the overlay, no shape masks
+                frame = self.apply_overlay_mask(frame)
+            else:
+                # Normal mode: Apply shape masking with audio-reactive animations
+                frame = self.apply_shape_mask(frame)
         
         return frame
     
@@ -437,6 +532,51 @@ class TushMode(WebsiteMode):
         
         return result
     
+    def apply_overlay_mask(self, im):
+        """Apply overlay mask from tush.png to the image - ONLY show visual where mask allows"""
+        if im is None:
+            return im
+        if self.overlay_image is None:
+            print("[TushMode] Warning: overlay_image is None, cannot apply overlay mask")
+            return im
+        
+        try:
+            # Prepare overlay mask
+            mask = self._prepare_overlay_mask(self.width, self.height)
+            if mask is None:
+                print("[TushMode] Warning: Failed to prepare overlay mask")
+                return im
+            
+            print(f"[TushMode] Applying overlay mask: mask shape={mask.shape}, mask min={mask.min():.3f}, max={mask.max():.3f}, mean={mask.mean():.3f}")
+            
+            # Convert image to numpy array
+            img_array = np.array(im)
+            img_height, img_width, img_channels = img_array.shape
+            
+            # Ensure mask matches image dimensions
+            if mask.shape != (img_height, img_width):
+                # Resize mask if needed
+                mask_pil = Image.fromarray((mask * 255).astype(np.uint8))
+                mask_pil = mask_pil.resize((img_width, img_height), Image.LANCZOS)
+                mask = np.array(mask_pil).astype(np.float32) / 255.0
+            
+            # Start with black background
+            result_array = np.zeros((img_height, img_width, img_channels), dtype=np.uint8)
+            
+            # Apply mask to image - only show visual where mask is non-zero
+            mask_3d = np.stack([mask, mask, mask], axis=2)
+            masked_visual = img_array.astype(np.float32) * mask_3d
+            
+            # Composite masked visual onto black background
+            result_array = np.clip(masked_visual, 0, 255).astype(np.uint8)
+            
+            # Convert back to PIL Image
+            result = Image.fromarray(result_array)
+            return result
+        except Exception as e:
+            print(f"Error applying overlay mask: {e}")
+            return im
+    
     def get_shape_strength(self, x, y, shape_type, pos, size):
         """Get the strength (0.0 to 1.0) for a pixel in a given shape with edge gradient"""
         
@@ -624,15 +764,15 @@ class TushMode(WebsiteMode):
         elif self.current_tempo_mode == 'half':
             tempo_multiplier = 0.5
         
-        self.pulse_phase += self.pulse_speed * tempo_multiplier * 0.1
+        self.pulse_phase += self.pulse_speed * tempo_multiplier * 0.1 * self.animation_speed_multiplier
         
         # Update strobe phase
         if self.strobe_mode:
-            self.strobe_phase += self.strobe_frequency * 0.1
+            self.strobe_phase += self.strobe_frequency * 0.1 * self.animation_speed_multiplier
         
         # Update rectangle scrolling
         if self.current_shape == 3:  # Rectangle shape
-            self.rectangle_scroll_offset += self.rectangle_scroll_speed
+            self.rectangle_scroll_offset += self.rectangle_scroll_speed * self.animation_speed_multiplier
             if self.rectangle_scroll_offset > self.width:
                 self.rectangle_scroll_offset = 0
         
@@ -646,7 +786,7 @@ class TushMode(WebsiteMode):
         
         # Smooth transition between shapes
         if self.current_shape != self.target_shape:
-            self.shape_transition_progress = min(1.0, self.shape_transition_progress + self.shape_transition_speed)
+            self.shape_transition_progress = min(1.0, self.shape_transition_progress + self.shape_transition_speed * self.animation_speed_multiplier)
             if self.shape_transition_progress >= 1.0:
                 self.current_shape = self.target_shape
         

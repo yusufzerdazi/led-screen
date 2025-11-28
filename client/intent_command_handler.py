@@ -221,7 +221,7 @@ class IntentCommandHandler:
                                 if text_scroller_text:
                                     text_scroller = {
                                         'text': text_scroller_text,
-                                        'wobble_amount': text_scroller_wobble if text_scroller_wobble is not None else 0.0
+                                        'wobble_amount': 0.0  # Always 0.0 (no wobble effect)
                                         # scroll_time calculated dynamically - not stored in CSV
                                     }
                                 
@@ -578,7 +578,8 @@ class IntentCommandHandler:
         text_scroller = result.get('text_scroller')
         if text_scroller and text_scroller.get('text'):
             text = text_scroller.get('text')
-            wobble = text_scroller.get('wobble_amount', 0.0)
+            # Always use wobble=0.0 (no wobble effect)
+            wobble = 0.0
             if self.text_scroller_callback:
                 self.logger.info(f"[Intent] Triggering text scroller: '{text}' (wobble: {wobble})")
                 self.text_scroller_callback(text, wobble)

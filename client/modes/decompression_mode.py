@@ -1034,43 +1034,34 @@ class DecompressionMode(WebsiteMode):
         
         Returns:
             Tuple of (text: str, wobble: float) or (None, 0.0) if no text_scroller configured
+            Note: wobble is always 0.0 (no wobble effect)
         """
         if gesture_config is None:
             gesture_config = self._get_wave_config()
         if gesture_config and gesture_config.get('text_scroller'):
             text = gesture_config['text_scroller'].get('text')
-            wobble = gesture_config['text_scroller'].get('wobble_amount', 0.0)
-            return text, wobble
+            # Always return wobble=0.0 (no wobble effect)
+            return text, 0.0
         return None, 0.0
     
     def _calculate_wave_duration(self, gesture_config=None):
-        """Calculate total duration for wave status (video + text scroll)
-        Duration is calculated exactly: video plays -> text scrolls until rightmost pixel exits -> end
-        No buffers - duration is based on actual completion.
+        """Calculate duration for wave status (video only)
+        
+        Note: Text scrolling is now queued separately after the video completes,
+        so this only returns the video duration.
         
         Args:
             gesture_config: Optional gesture config (will be fetched if None)
             
         Returns:
-            Total duration in seconds (video + text, no buffers)
+            Video duration in seconds (no buffers, no text scroll time)
         """
-        if gesture_config is None:
-            gesture_config = self._get_wave_config()
-        
         video_duration = 0.0
         if self.video_manager.has_video('hand_waving'):
             video_duration = self.video_manager.get_duration('hand_waving')
         
-        scroll_time = 0.0
-        if gesture_config and gesture_config.get('text_scroller'):
-            text = gesture_config['text_scroller'].get('text', '')
-            if text:
-                scroll_time = self._calculate_scroll_time(text)
-        
-        # Total duration: video + text scroll (no buffers)
-        # Transition from video to text happens immediately when video ends
-        # Text scroll time is calculated exactly when rightmost pixel exits
-        return video_duration + scroll_time
+        # Only return video duration - text scrolling is queued separately
+        return video_duration
     
     def _calculate_scroll_time(self, text: str, scroll_speed: float = 20.0) -> float:
         """Calculate scroll time based on when rightmost pixel exits screen (has negative x)
@@ -1394,7 +1385,7 @@ class DecompressionMode(WebsiteMode):
             # Set up text scroller
             with self.text_scroller_lock:
                 self.intent_text_scroller_text = quip
-                self.intent_text_scroller_wobble = 0.5  # Moderate wobble
+                self.intent_text_scroller_wobble = 0.0  # No wobble
             
             # Switch to text_scroller_intent status temporarily
             with self.status_lock:
@@ -1701,12 +1692,12 @@ class DecompressionMode(WebsiteMode):
         else:
             print(f"[Voice Command TTS] TTS not available, would have spoken: {text}")
     
-    def _handle_voice_text_scroller(self, text: str, wobble_amount: float):
+    def _handle_voice_text_scroller(self, text: str, wobble_amount: float = 0.0):
         """Handle text scroller display from voice intent
         
         Args:
             text: Text to display in scroller
-            wobble_amount: Wobble effect amount (0.0 to 1.0)
+            wobble_amount: Wobble effect amount (ignored - always 0.0, no wobble)
         """
         if not text:
             return
@@ -1718,16 +1709,16 @@ class DecompressionMode(WebsiteMode):
         # If we're in an animation, queue the text scroller to play after
         if animation_status and animation_status != 'text_scroller_intent':
             self.logger.info(f"[Voice Text Scroller] Animation '{animation_status}' active, queuing text scroller")
-            self.queue_action('text_scroller', text=text, wobble=wobble_amount)
+            self.queue_action('text_scroller', text=text, wobble=0.0)
             return
         
         # If text_scroller_intent is already active, update it with new text
         if animation_status == 'text_scroller_intent':
             self.logger.info(f"[Voice Text Scroller] Updating existing text scroller with new text: '{text}'")
-            # Update text and recalculate duration
+            # Update text and recalculate duration (wobble always 0.0)
             with self.text_scroller_lock:
                 self.intent_text_scroller_text = text
-                self.intent_text_scroller_wobble = wobble_amount
+                self.intent_text_scroller_wobble = 0.0
             scroll_time = self._calculate_scroll_time(text)
             duration = scroll_time  # No buffer - exact calculation
             with self.status_lock:
@@ -1735,8 +1726,8 @@ class DecompressionMode(WebsiteMode):
                 self.status_start_time = time.time()  # Reset timer for new text
             return
         
-        # No animation active, show text scroller immediately
-        self._execute_text_scroller(text, wobble_amount)
+        # No animation active, show text scroller immediately (wobble always 0.0)
+        self._execute_text_scroller(text, wobble_amount=0.0)
     
     def _set_pending_animation_config(self, status: str, gesture_config: Optional[Dict]):
         """Store gesture config so _enter_status can reuse it without re-randomizing"""
@@ -1755,13 +1746,17 @@ class DecompressionMode(WebsiteMode):
         return None
     
     def _get_text_from_gesture_config(self, gesture_config: Optional[Dict]) -> Tuple[Optional[str], float]:
-        """Extract text scroller info from a gesture config"""
+        """Extract text scroller info from a gesture config
+        
+        Returns:
+            Tuple of (text: str, wobble: float)
+            Note: wobble is always 0.0 (no wobble effect)
+        """
         text = None
-        wobble = 0.0
         if gesture_config and gesture_config.get('text_scroller'):
             text = gesture_config['text_scroller'].get('text')
-            wobble = gesture_config['text_scroller'].get('wobble_amount', 0.0)
-        return text, wobble
+        # Always return wobble=0.0 (no wobble effect)
+        return text, 0.0
     
     def queue_action(self, action_type: str, **kwargs):
         """Queue an action to be processed after current animation completes
@@ -1794,9 +1789,9 @@ class DecompressionMode(WebsiteMode):
         # Process the action based on type
         if action['type'] == 'text_scroller':
             text = action.get('text')
-            wobble = action.get('wobble', 0.0)
             if text:
-                self._execute_text_scroller(text, wobble)
+                # Always use wobble=0.0 (no wobble effect)
+                self._execute_text_scroller(text, wobble_amount=0.0)
                 return action
         elif action['type'] == 'tts':
             message = action.get('message')
@@ -1815,20 +1810,20 @@ class DecompressionMode(WebsiteMode):
         
         return action
     
-    def _execute_text_scroller(self, text: str, wobble_amount: float):
+    def _execute_text_scroller(self, text: str, wobble_amount: float = 0.0):
         """Execute a text scroller action (called from queue or directly)
         
         Args:
             text: Text to display
-            wobble_amount: Wobble amount for text
+            wobble_amount: Wobble amount for text (ignored - always 0.0, no wobble)
         """
         # Calculate scroll duration
         scroll_time = self._calculate_scroll_time(text)
         
-        # Store text for rendering
+        # Store text for rendering (wobble always 0.0)
         with self.text_scroller_lock:
             self.intent_text_scroller_text = text
-            self.intent_text_scroller_wobble = wobble_amount
+            self.intent_text_scroller_wobble = 0.0
         
         # Store previous status if not already stored
         with self.status_lock:
@@ -2063,27 +2058,10 @@ class DecompressionMode(WebsiteMode):
             # Set duration to 10 minutes (600 seconds) for main statuses
             self.status_duration = 600.0
         elif status == 'wave':
-            # Wave status - use specialized helper methods
+            # Wave status - only video duration (text is queued separately)
             gesture_config = animation_config or self._get_wave_config()
-            if self.status_substate == 'hand_waving':
-                # Calculate total duration (video + text scroll)
-                self.status_duration = self._calculate_wave_duration(gesture_config)
-            else:
-                # Text scroller substate - calculate text scroll time only
-                with self.status_lock:
-                    text = self.animation_text
-                if not text:
-                    text, _ = self._get_wave_text_config(gesture_config)
-                if text:
-                    scroll_time = self._calculate_scroll_time(text)
-                    # Add buffer to ensure text fully scrolls off screen
-                    self.status_duration = scroll_time  # No buffer - exact calculation
-                else:
-                    # No text - just video duration
-                    video_duration = 0.0
-                    if self.video_manager.has_video('hand_waving'):
-                        video_duration = self.video_manager.get_duration('hand_waving')
-                    self.status_duration = video_duration  # No buffer - exact video duration
+            # Wave only has hand_waving substate - text scrolling is queued separately
+            self.status_duration = self._calculate_wave_duration(gesture_config)
         elif status == 'think':
             # Think status has custom duration calculation
             video_duration = 0
@@ -2225,7 +2203,8 @@ class DecompressionMode(WebsiteMode):
             
             # Check people detection timeout - switch to configured status if no segments detected for 5 seconds
             # Only check base_status, not animations
-            if self.base_status in ['people', 'people_kaleidoscope']:
+            # Skip timeout check if an animation is playing (don't interrupt animations)
+            if self.base_status in ['people', 'people_kaleidoscope'] and self.animation_status is None:
                 if self.last_people_segment_time is None:
                     # No segments detected yet, check if timeout exceeded
                     if self.people_mode_entered_time is not None:
@@ -2292,13 +2271,30 @@ class DecompressionMode(WebsiteMode):
                                     self.animation_text = text
                                     self.animation_text_wobble = wobble
                             if text:
-                                # Move to text_scroller phase immediately
-                                self.status_substate = 'text_scroller'
-                                self.status_start_time = current_time  # Reset timer for text phase
-                                # Calculate scroll time exactly when rightmost pixel exits
-                                scroll_time = self._calculate_scroll_time(text)
-                                self.status_duration = scroll_time  # No buffer - exact calculation
-                                self.logger.info(f"Wave: transitioning to text scroller (duration: {scroll_time:.2f}s)")
+                                # Queue text scroller to play after wave animation completes
+                                self.queue_action('text_scroller', text=text, wobble=0.0)
+                                self.logger.info(f"Wave: queued text scroller '{text[:30]}...' to play after animation")
+                                # Wave animation complete - return to previous status
+                                with self.status_lock:
+                                    self.animation_status = None
+                                    # Return to previous_status if valid, otherwise base_status
+                                    return_status = self.previous_status if (self.previous_status and self.previous_status in self.main_statuses) else self.base_status
+                                    self.current_status = return_status
+                                    self.base_status = return_status  # Update base_status to match
+                                    self.status_start_time = time.time()
+                                    self.animation_text = None
+                                    self.animation_text_wobble = 0.0
+                                
+                                # Reset gesture processing flag
+                                with self.gesture_processing_lock:
+                                    self.gesture_processing = False
+                                
+                                # Process action queue (will show text scroller)
+                                queued_action = self._process_action_queue()
+                                if not queued_action:
+                                    self.status_duration = None
+                                next_status = None  # No transition needed - already on return_status
+                                return  # Exit early, don't continue to else block
                             else:
                                 # No text configured in CSV, wave animation complete - return to previous status
                                 with self.status_lock:
@@ -2322,30 +2318,8 @@ class DecompressionMode(WebsiteMode):
                                 if not queued_action:
                                     self.status_duration = None
                                 next_status = None  # No transition needed - already on return_status
-                    elif self.status_substate == 'text_scroller':
-                        # Wave animation complete - return to previous status
-                        with self.status_lock:
-                            self.animation_status = None
-                            # Return to previous_status if valid, otherwise base_status
-                            return_status = self.previous_status if (self.previous_status and self.previous_status in self.main_statuses) else self.base_status
-                            self.current_status = return_status
-                            self.base_status = return_status  # Update base_status to match
-                            self.status_start_time = time.time()
-                            self.animation_text = None
-                            self.animation_text_wobble = 0.0
-                        
-                        # Reset gesture processing flag
-                        with self.gesture_processing_lock:
-                            self.gesture_processing = False
-                        
-                        self.logger.info(f"Wave animation complete, returning to previous status: {return_status}")
-                        
-                        # Process action queue before returning
-                        queued_action = self._process_action_queue()
-                        if not queued_action:
-                            # Clear status_duration so the new status can have automatic transitions
-                            self.status_duration = None
-                        next_status = None  # No transition needed - already on return_status
+                    # Note: text_scroller substate is no longer used - text is queued separately
+                    # This elif block is kept for backwards compatibility but should not be reached
                 elif self.base_status in ['eye', 'people', 'raw', 'people_kaleidoscope']:
                     # Main statuses timeout: eye/people/people_kaleidoscope after 10 minutes, raw after 1 minute
                     # Note: people_kaleidoscope also respects people detection timeout (checked above)
@@ -2764,34 +2738,14 @@ class DecompressionMode(WebsiteMode):
         return Image.fromarray(masked_visual)
     
     def _render_wave_status(self):
-        """Render the wave status (hand wave and text animation)"""
+        """Render the wave status (hand wave video only - text is queued separately)"""
         status_info = self.get_status_info()
         elapsed = status_info['elapsed']
         substate = status_info['substate']
         
-        if substate == 'hand_waving':
-            return self._render_waving_hand(elapsed)
-        elif substate == 'text_scroller':
-            # Use stored text selected when entering the text phase
-            # Note: elapsed is already relative to text phase start (status_start_time was reset when transitioning)
-            with self.status_lock:
-                text = self.animation_text
-                wobble = self.animation_text_wobble
-            if not text:
-                # Fallback: fetch from config (shouldn't normally happen)
-                text, wobble = self._get_wave_text_config()
-                with self.status_lock:
-                    self.animation_text = text
-                    self.animation_text_wobble = wobble
-            # Only render text if configured
-            if text:
-                return self._render_scrolling_text(text, elapsed, wobble_amount=wobble)
-            else:
-                # No text configured, return to hand_waving or end status
-                return self._render_waving_hand(elapsed)
-        else:
-            # Default to hand_waving if substate not set
-            return self._render_waving_hand(elapsed)
+        # Wave only has hand_waving substate - text scrolling is queued separately
+        # Always render the hand waving video
+        return self._render_waving_hand(elapsed)
     
     def _render_waving_hand(self, elapsed):
         """Render hand wave video with intensity masking for 40x30 screen"""
@@ -2838,7 +2792,7 @@ class DecompressionMode(WebsiteMode):
             
             # Render text scroller if text is available
             if text:
-                return self._render_scrolling_text(text, text_elapsed, wobble_amount=wobble)
+                return self._render_scrolling_text(text, text_elapsed, wobble_amount=0.0)
             
             # No text configured in CSV, return black frame (don't hold last video frame)
             return Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
@@ -2954,12 +2908,12 @@ class DecompressionMode(WebsiteMode):
             
             # Render text scroller if text is available
             if text:
-                return self._render_scrolling_text(text, text_elapsed, wobble_amount=wobble)
+                return self._render_scrolling_text(text, text_elapsed, wobble_amount=0.0)
             
             # No text configured in CSV, return black frame (don't hold last video frame)
             return Image.new('RGB', (self.width, self.height), color=(0, 0, 0))
     
-    def _render_scrolling_text(self, text: str, elapsed: float, wobble_amount=1.0):
+    def _render_scrolling_text(self, text: str, elapsed: float, wobble_amount=0.0):
         """Render scrolling text that moves across the screen with wobbly effects.
         
         Uses the Hydra visual as a color source, so text pixels sample colors from the visual.
@@ -2994,13 +2948,12 @@ class DecompressionMode(WebsiteMode):
             status_info = self.get_status_info()
             elapsed = status_info['elapsed']
             
-            # Get stored text and wobble (thread-safe access)
+            # Get stored text (thread-safe access)
             with self.status_lock:
                 text = self.intent_text_scroller_text
-                wobble = self.intent_text_scroller_wobble
             
             if text:
-                return self._render_scrolling_text(text, elapsed, wobble_amount=wobble)
+                return self._render_scrolling_text(text, elapsed, wobble_amount=0.0)
             else:
                 # Fallback: return black frame if no text
                 return Image.new('RGB', (self.width, self.height), color=(0, 0, 0))

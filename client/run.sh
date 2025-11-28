@@ -50,8 +50,8 @@ for arg in "$@"; do
     fi
 done
 
-# Start Hydra for modes that need it (tush/music/hydra_mask/mask/decompression)
-if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]] || [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]] || [[ "$MODE" == "decompression" ]]; then
+# Start Hydra for modes that need it (tush/music/hydra_mask/mask/decompression/mischief)
+if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]] || [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]] || [[ "$MODE" == "decompression" ]] || [[ "$MODE" == "mischief" ]]; then
     # Check if console mode is enabled (need to check before starting Hydra)
     CONSOLE_MODE=false
     for arg in "$@"; do
@@ -64,7 +64,7 @@ if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]] || [[ "$MODE" == "hydra_m
     echo "Starting local Hydra instance for $MODE mode..."
     # Redirect Hydra output to log file when in console mode to avoid interfering with Rich
     if [[ "$CONSOLE_MODE" == true ]]; then
-        cd "$SCRIPT_DIR/../../hydra" && npm run dev > "$SCRIPT_DIR/hydra.log" 2>&1 &
+        cd "$SCRIPT_DIR/../../hydra" && npm run dev &
     else
         cd "$SCRIPT_DIR/../../hydra" && npm run dev &
     fi
