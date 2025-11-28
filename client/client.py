@@ -12,45 +12,59 @@ import random
 
 # from pyppeteer import launchimport socket
 
-from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
-from picamera2.outputs import FileOutput
+# Camera imports removed for music visualizer
 
 import numpy as np
 from threading import Thread
 import threading
 import time
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+# Hardware-specific audio imports (only needed on real hardware, not in simulation)
+try:
+    import pyaudio
+    PYAUDIO_AVAILABLE = True
+except ImportError:
+    PYAUDIO_AVAILABLE = False
+    print("PyAudio not available - audio capture will be disabled in simulation mode")
 
-from text_scroller import TextScroller
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
+    print("librosa not available - advanced audio analysis features will be limited")
+
+import wave
+import struct
+import numpy as np
+
+# Selenium imports removed for music visualizer
 
 from ai_helper import AiHelper
 
-# Configure ChromeOptions
-chrome_options = Options()
-chrome_options.add_argument("--headless")  # Run in headless mode
-chrome_options.add_argument("--no-sandbox")  # No sandbox for Pi
-#chrome_options.add_argument("--ignore-gpu-blacklist")
-#chrome_options.add_argument("--enable-webgl")
-#chrome_options.add_argument("--use-fake-device-for-media-stream");
-#chrome_options.add_argument("--use-fake-ui-for-media-stream")
+# Chrome/Selenium configuration removed for music visualizer
 
-chrome_options.add_experimental_option("prefs", { \
-    "profile.default_content_setting_values.media_stream_mic": 1, 
-    "profile.default_content_setting_values.media_stream_camera": 1
-})
+# Hardware-specific LED imports (ws2812 requires spidev which is Pi-specific)
+try:
+    import ws2812
+    WS2812_AVAILABLE = True
+except ImportError as e:
+    WS2812_AVAILABLE = False
+    print(f"ws2812 hardware module not available: {e}")
+    print("Real LED hardware will not work, but simulation mode is available")
 
-# Initialize the WebDriver instance
-service = Service('/usr/bin/chromedriver')  # Path to Chromium's driver
-
-import ws2812
 import simulation
 import mqtt
+
+# Speech-to-text import (optional)
+try:
+    from speech_to_text import SpeechToText
+    STT_AVAILABLE = True
+except ImportError:
+    STT_AVAILABLE = False
+    print("Speech-to-text not available - install SpeechRecognition and openai-whisper")
+
+DEFAULT_TARGET_FPS = 24.0
 
 lock = threading.RLock()
 
@@ -65,13 +79,25 @@ class Client:
         self.width = 40
         self.height = 30
         self.server = server
-        self.mqtt = mqtt.Mqtt(self.on_message)
+        
+        # Initialize MQTT only if server mode is enabled
+        if self.server:
+            self.mqtt = mqtt.Mqtt(self.on_message)
+            print("MQTT enabled - will listen for remote messages")
+        else:
+            self.mqtt = None
+            print("MQTT disabled - running in standalone mode")
+        
         self.leds = leds
+        self.target_fps = DEFAULT_TARGET_FPS
+        self.frame_interval = 1.0 / self.target_fps
+        
+        # Current display mode
+        self.current_mode = None
         
         # Set strip delay for synchronization (adjust as needed)
         self.leds.set_strip_delay(0.001)  # 1ms delay between strips
         
-        self.text_scroller = TextScroller(self.width, self.height)
         self.display_mode = None
                 
         # Add monitoring variables
@@ -80,205 +106,137 @@ class Client:
         self.max_static_frames = 50  # About 5 seconds at 0.05s refresh rate
         self.monitoring_active = True
         
-        # Initialize AI helper
-        self.ai_helper = AiHelper()
+        # AI helper removed - using stock visuals instead
         
-        # Start monitoring thread
+        # Generic display state (used by legacy code and fallbacks)
+        self.display_mode = None
+        self.last_frame = None
+        
+        # Start monitoring thread (generic, used by all modes)
+        self.monitoring_active = True
         self.monitor_thread = Thread(target=self.monitor_display)
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
         
-        # Add variables for random interjections
-        self.last_interjection_time = time.time()
-        self.interjection_period = 300  # 5 minutes between random interjections
-        self.interjection_chance = 0.2  # 20% chance when period has passed
+        # Speech-to-text (optional, can be enabled per mode)
+        self.speech_to_text = None
+        self.stt_enabled = False
         
-        # Start interjection thread
-        self.interjection_thread = Thread(target=self.check_interjections)
-        self.interjection_thread.daemon = True
-        self.interjection_thread.start()
-        
-        # Add text display queue
-        self.text_queue = []
-        self.text_lock = threading.Lock()
-        
-        # Start text display thread
-        self.text_thread = Thread(target=self.process_text_queue)
-        self.text_thread.daemon = True
-        self.text_thread.start()
-        
-        # Add camera snapshot
-        self.camera_snapshot = None
-        self.camera_snapshot_time = 0
-        self.camera_snapshot_interval = 1  # Update snapshot every second
+        # Check if simulation mode
+        self.is_simulation = isinstance(leds, simulation.Leds)
+        if self.is_simulation:
+            print("Running in simulation mode")
+
+
+
+
 
     def monitor_display(self):
         """Thread function to monitor display for static frames"""
         while self.monitoring_active:
-            if self.display_mode == 'website' and self.last_frame is not None:
-                try:
-                    # Check if frame is static
-                    if self.check_static_frame(self.last_frame):
-                        self.static_frame_count += 1
-                        if self.static_frame_count >= self.max_static_frames:
-                            self.handle_visualization_failure()
-                    else:
-                        self.static_frame_count = 0
-                except Exception as e:
-                    print(f"Error in monitor thread: {e}")
+            # Monitoring disabled - no fallback needed
             time.sleep(0.1)  # Check every 0.1s
         
     def init(self):
-        self.mqtt.connect()
+        # Connect to MQTT if server mode is enabled
+        if self.mqtt:
+            self.mqtt.connect()
+        
         self.leds.init()
         
-        # Show startup greeting
-        greeting = self.ai_helper.generate_greeting()
-        self.queue_text(greeting)
+        # Audio capture handled by current mode if needed
+        
+        # Speech-to-text can be enabled by modes if needed
+        # No AI greeting - using stock visuals
 
-    def load_camera(self):
-        self.camera = Picamera2()
-        preview_config = self.camera.create_preview_configuration(main={"size": (120, 80)}, lores={"size": (120, 80)}, display="lores")
-        self.camera.configure(preview_config)
-        self.camera.start()  # Start camera when loaded
-
-    def start_camera_stream(self):
-        self.camera = Picamera2()
-        video_config = self.camera.create_preview_configuration(main={"size": (120, 80)}, lores={"size": (120, 80)}, display="lores")
-        self.camera.configure(video_config)
-        encoder = H264Encoder(1000000)
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind(("0.0.0.0", 10001))
-            sock.listen()
-
-            self.camera.encoders = encoder
-
-            print("1")
-            conn, addr = sock.accept()
-            print("2")
-            stream = conn.makefile("wb")
-            print("3")
-            encoder.output = FileOutput(stream)
-            print("4")
-            self.camera.start_encoder(encoder)
-            print("starting stream")
-            self.camera.start()
-            print("streaming")
     
     def load_website(self, url = None):
         if url != None:
             self.url = url
-            # Only create new browser instance for initial load
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.driver.set_window_size(240, 160)
-            self.driver.get(self.url)
-            
-            # Inject jQuery
-            jquery_js = """
-                if (typeof jQuery === 'undefined') {
-                    var script = document.createElement('script');
-                    script.src = 'https://code.jquery.com/jquery-3.6.0.min.js';
-                    document.head.appendChild(script);
-                }
-            """
-            self.driver.execute_script(jquery_js)
-            
-            # Wait for jQuery to load
-            self.driver.execute_script("""
-                return new Promise((resolve) => {
-                    function checkJQuery() {
-                        if (window.jQuery) {
-                            resolve();
-                        } else {
-                            setTimeout(checkJQuery, 100);
-                        }
-                    }
-                    checkJQuery();
-                });
-            """)
-            
-            # Hide UI elements
-            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
-            self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+            # Set up webdriver for Hydra
+            try:
+                from selenium import webdriver
+                from selenium.webdriver.chrome.service import Service
+                from selenium.webdriver.chrome.options import Options
+                
+                # Configure ChromeOptions
+                chrome_options = Options()
+                chrome_options.add_argument("--headless=new")  # Headless with better WebGL support
+                chrome_options.add_argument("--no-sandbox")  # No sandbox for Pi
+                chrome_options.add_argument("--use-gl=egl")  # Enable EGL for WebGL
+                chrome_options.add_argument("--enable-webgl")
+                chrome_options.add_argument("--ignore-gpu-blocklist")
+                chrome_options.add_argument("--window-size=240,160")
+                
+                # Fallback if webdriver-manager is not installed
+                import shutil
+                chromedriver_path = shutil.which('chromedriver')
+                if not chromedriver_path:
+                    for path in ['/usr/bin/chromedriver', '/usr/local/bin/chromedriver']:
+                        import os
+                        if os.path.exists(path):
+                            chromedriver_path = path
+                            break
+                
+                if chromedriver_path:
+                    service = Service(chromedriver_path)
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                else:
+                    # Try without explicit service path (uses PATH)
+                    self.driver = webdriver.Chrome(options=chrome_options)
+                self.driver.set_window_size(240, 160)
+                self.driver.get(self.url)
+                
+                # Hide UI elements to get clean visualization
+                try:
+                    self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
+                    self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
+                    # Auto-run any existing code
+                    try:
+                        self.driver.execute_script("""
+                            // Auto-run the current code if hydraSynth is available
+                            if (typeof hydraSynth !== 'undefined' && hydraSynth) {
+                                try {
+                                    eval(hydraSynth.getCode());
+                                } catch(e) {
+                                    console.log('Auto-run failed:', e);
+                                }
+                            }
+                        """)
+                        print("Auto-executed initial Hydra code")
+                    except Exception as e:
+                        print(f"Could not auto-run initial code: {e}")
+                    print("Hidden Hydra UI overlays")
+                except Exception as e:
+                    print(f"Could not hide overlays: {e}")
+                
+                print(f"Loaded Hydra visualizer at: {url}")
+            except Exception as e:
+                print(f"Error setting up webdriver: {e}")
+                self.driver = None
 
-    def update_camera_snapshot(self):
-        """Update the base64 encoded camera snapshot"""
-        try:
-            # Only update if enough time has passed
-            current_time = time.time()
-            if current_time - self.camera_snapshot_time >= self.camera_snapshot_interval:
-                # Create a temporary buffer for the image
-                buffer = BytesIO()
-                
-                # Capture directly to buffer with small size
-                self.camera.capture_file(buffer, format='png')
-                buffer.seek(0)
-                
-                # Convert to base64
-                base64_image = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                
-                # Store with data URL prefix for PNG
-                self.camera_snapshot = "data:image/png;base64, " + base64_image
-                self.camera_snapshot_time = current_time
-                
-        except Exception as e:
-            print(f"Error updating camera snapshot: {e}")
+    
+    
+    
+    def update_audio_levels(self, frequencies):
+        """Update audio frequency levels for visualization (MQTT fallback)"""
+        # Delegate to current mode if it has this method
+        if self.current_mode and hasattr(self.current_mode, 'update_audio_levels'):
+            return self.current_mode.update_audio_levels(frequencies)
 
     def update_hydra_code(self, code=None):
         """Update the Hydra editor with new code"""
-        try:
-            if code is None:
-                self.url = "http://localhost:5173"
-                self.driver.get(self.url)
-                return
-                
-            # Update camera snapshot
-            #self.update_camera_snapshot()
-            
-            # Replace camera token with actual snapshot if present
-            #if self.camera_snapshot and "CAMERA_FEED_TOKEN" in code:
-            #    code = code.replace("CAMERA_FEED_TOKEN", self.camera_snapshot)
-            
-            print(code)
-
-            # Use jQuery to update editor and run code
-            # js_code = f"""
-            #     // Click editor
-            #     $('.CodeMirror').click();
-                
-            #     // Select all text and delete
-            #     for (var i = 0; i < $('.CodeMirror').length; i++) {{
-            #         $('.CodeMirror')[i].CodeMirror.setValue('');
-            #     }}
-                
-            #     // Set new code
-            #     $('.CodeMirror')[0].CodeMirror.setValue(`{code}`);
-                
-            #     // Click run button
-            #     $('#run-icon').click();
-            # """
-            # self.driver.execute_script(js_code)
-
-            new_code = base64.b64encode(code.encode('utf-8'))
-            self.url = "http://localhost:5173?code=" + urllib.parse.quote_plus(new_code)
-            
-            # Load new URL
-            self.driver.get(self.url)
-            
-            # Hide UI elements again after reload
-            self.driver.execute_script("document.getElementById('modal').style.display = 'none';")
-            self.driver.execute_script("document.getElementById('editor-container').style.display = 'none';")
-
-        except Exception as e:
-            print(f"Error updating code: {e}")
+        # Delegate to current mode if it has this method
+        if self.current_mode and hasattr(self.current_mode, 'update_hydra_code'):
+            return self.current_mode.update_hydra_code(code)
 
     def on_message(self, client, userdata, msg):
         decoded = json.loads(msg.payload.decode())
         if decoded['type'] == "frequency":
             self.display_mode = 'frequency'
             self.frequency_display(decoded)
+            # Update audio levels for visualization
+            self.update_audio_levels(decoded.get('frequencies', []))
         if decoded['type'] == "image":
             self.rgb_display(decoded)
         if decoded['type'] == "rgb":
@@ -291,44 +249,95 @@ class Client:
                 content = json.loads(decoded['content'])            
                 if 'code' in content:
                     self.update_hydra_code(content['code'])
-
-                if 'quip' in content:
-                    self.text_scroller.start_scroll(content['quip'])
-                    self.display_mode = 'scroll'
-                
-                # Update last visualization time
-                self.last_visualization_time = time.time()
             except Exception as e:
                 print(f"Error processing hydra message: {e}")
 
+    def set_mode(self, mode):
+        """
+        Set the current display mode.
+        
+        Args:
+            mode: A BaseMode instance
+        """
+        # Clean up old mode if exists
+        if self.current_mode:
+            self.current_mode.cleanup()
+        
+        self.current_mode = mode
+        print(f"Mode set to: {mode.__class__.__name__}")
+        
+        # Initialize the new mode
+        if self.current_mode:
+            self.current_mode.init()
+    
     def update_display(self):
         """Main display update method"""
-        if self.display_mode == 'scroll':
-            if self.text_scroller.is_scrolling:
-                frame = self.text_scroller.get_frame()
-                if frame:
-                    self.pil_display(frame)
-            else:
-                self.display_mode = 'website'
+        if self.current_mode:
+            # Get frame from mode and display it
+            frame = self.current_mode.update()
+            if frame:
+                self.pil_display(frame)
+        elif self.display_mode == 'frequency':
+            # Fallback for MQTT frequency mode
+            pass
         elif self.display_mode == 'website':
             self.website_display()
-        elif self.display_mode == 'camera':
-            self.camera_display()
         elif self.display_mode == 'dashboard':
             self.dashboard_display()
-        elif self.display_mode == 'frequency':
-            # Frequency display is handled by mqtt messages
-            pass
 
     def frequency_display(self, msg):
-        x = 0
-        for f in msg["frequencies"]:
-            for y in range(30):
-                if int(f * 4) > y:
-                    self.leds.set_pixel_color(x, y, 100, 255 - 6 * x, 255 - 8 * y)
-                else:  
-                    self.leds.set_pixel_color(x, y, 0, 0, 0)
-            x += 1
+        """Create sparse, center-focused music visualization"""
+        # Clear all pixels first
+        for x in range(self.width):
+            for y in range(self.height):
+                self.leds.set_pixel_color(x, y, 0, 0, 0)
+        
+        # Get frequency data
+        frequencies = msg.get("frequencies", [])
+        if not frequencies:
+            return
+            
+        # Calculate center position
+        center_x = self.width // 2
+        center_y = self.height // 2
+        
+        # Use bass frequencies (first 4) for center pulsing
+        bass_level = sum(frequencies[:4]) / 4 if len(frequencies) >= 4 else 0
+        bass_intensity = min(int(bass_level * 255), 255)
+        
+        # Use treble frequencies (last 4) for outer ring
+        treble_level = sum(frequencies[-4:]) / 4 if len(frequencies) >= 4 else 0
+        treble_intensity = min(int(treble_level * 255), 255)
+        
+        # Create pulsing center based on bass
+        if bass_intensity > 10:  # Only light up if there's significant bass
+            # Center pulsing circle
+            radius = int(bass_intensity / 50) + 1  # Scale radius based on bass
+            for x in range(max(0, center_x - radius), min(self.width, center_x + radius + 1)):
+                for y in range(max(0, center_y - radius), min(self.height, center_y + radius + 1)):
+                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                    if distance <= radius:
+                        # Create pulsing effect with bass
+                        intensity = int(bass_intensity * (1 - distance / radius))
+                        # Use warm colors for bass
+                        r = intensity
+                        g = int(intensity * 0.3)
+                        b = int(intensity * 0.1)
+                        self.leds.set_pixel_color(x, y, r, g, b)
+        
+        # Add outer ring based on treble
+        if treble_intensity > 10:  # Only light up if there's significant treble
+            outer_radius = int(treble_intensity / 30) + 3
+            for x in range(max(0, center_x - outer_radius), min(self.width, center_x + outer_radius + 1)):
+                for y in range(max(0, center_y - outer_radius), min(self.height, center_y + outer_radius + 1)):
+                    distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
+                    if 2 <= distance <= outer_radius:  # Ring, not filled
+                        # Use cool colors for treble
+                        intensity = int(treble_intensity * 0.5)
+                        r = int(intensity * 0.2)
+                        g = int(intensity * 0.8)
+                        b = intensity
+                        self.leds.set_pixel_color(x, y, r, g, b)
     
     def image_display(self, msg):
         for pix in msg["pixels"]:
@@ -343,16 +352,17 @@ class Client:
         self.pil_display(im)
 
     def pil_display(self, pil):
+        if pil is None:
+            print("Error: PIL image is None")
+            return
+            
         im = pil.resize((self.width, self.height), Image.LANCZOS)
+        
+        # Simple display - just show the image as-is
         for i in range(self.width):
             for j in range(self.height):
                 pix = im.getpixel((i, self.height - j - 1))
                 self.leds.set_pixel_color(i, j, pix[0], pix[1], pix[2])
-    
-    def camera_display(self):
-        image = self.camera.capture_file("cam.png")
-        self.pil_display(Image.open("cam.png"))
-        #self.image_display({"pixels": [((x, y), (image[x][y][0], image[x][y][1], image[x][y][2])) for x in range(len(image)) for y in range(len(image[0]))]})
 
     def dashboard_display(self):
         sensor_response = requests.get("http://192.168.0.46/api/45F3isezBAfXK82b401E9MfiyFgAMCIs7nIGtoUV/sensors/12").json()
@@ -368,91 +378,140 @@ class Client:
       
     def website_display(self):
         try:
-            image = self.driver.get_screenshot_as_base64()
-            frame = Image.open(BytesIO(base64.b64decode(image)))
-            self.last_frame = frame
-            self.bytes_display(image)
+            # No initial loading needed - just use whatever is on the page
+            
+            # Try to get screenshot from Hydra if available
+            if hasattr(self, 'driver') and self.driver:
+                try:
+                    # Non-blocking FPS cap for screenshots
+                    now = time.time()
+                    # FPS limiting handled by current mode if needed
+                    image = self.driver.get_screenshot_as_base64()
+                    frame = Image.open(BytesIO(base64.b64decode(image)))
+                    
+                    # Check if frame is valid
+                    if frame is None:
+                        print("Error: Screenshot frame is None")
+                        return
+                    
+                    # Visual processing handled by current mode if needed
+                    
+                    # Display the frame directly
+                    self.last_frame = frame
+                    # Render the already-decoded PIL frame directly
+                    self.pil_display(frame)
+                    # Display mode logging handled by current mode
+                    return
+                except Exception as e:
+                    print(f"Error getting Hydra screenshot: {e}")
+                    return
+            else:
+                print("No driver available for screenshots")
+                return
+            
         except Exception as e:
             print(f"Error in website display: {e}")
-            self.handle_visualization_failure()
 
-    def check_static_frame(self, frame):
-        """Check if frame is static (black or single color) or has error logs"""
-        try:
-            # Then check frame
-            small_frame = frame.resize((4, 3), Image.LANCZOS)
-            pixels = list(small_frame.getdata())
-            
-            # Check if all pixels are the same or black
-            first_pixel = pixels[0]
-            is_black = first_pixel == (0, 0, 0)
-            all_same = all(pixel == first_pixel for pixel in pixels)
-            
-            return is_black and all_same
-        except Exception as e:
-            print(f"Error checking frame: {e}")
-            return False
-
-    def handle_visualization_failure(self):
-        """Handle failed visualization by showing quip and requesting new one"""
-        print("Visualization failed, requesting new one")
-        
-        # Reset counters
-        self.static_frame_count = 0
-        self.last_frame = None
-        
-        # Queue failure quip
-        failure_quip = self.ai_helper.generate_failure_quip()
-        self.queue_text(failure_quip)
-        
-        self.update_hydra_code()
 
     def check_interjections(self):
-        """Thread to occasionally inject random quips"""
-        while self.monitoring_active:
-            current_time = time.time()
-            if (current_time - self.last_interjection_time >= self.interjection_period and 
-                random.random() < self.interjection_chance):
-                
-                quip = self.ai_helper.generate_random_quip()
-                if quip:
-                    self.queue_text(quip)
-                    self.last_interjection_time = current_time
+        """Thread removed for music visualizer"""
+        pass
+
+    def enable_speech_to_text(self, model_size="base", on_text_callback=None):
+        """Enable speech-to-text listening
+        
+        Args:
+            model_size: Whisper model size ("tiny", "base", "small", "medium", "large")
+            on_text_callback: Optional callback function(text) called when text is transcribed
+        """
+        if not STT_AVAILABLE:
+            print("Speech-to-text not available")
+            return False
+        
+        if self.speech_to_text:
+            print("Speech-to-text already enabled")
+            return True
+        
+        try:
+            self.speech_to_text = SpeechToText(model_size=model_size, use_whisper=True)
             
-            time.sleep(10)  # Check every 10 seconds
+            # Default callback: just log the text
+            def default_callback(text):
+                print(f"[STT] Transcribed speech: {text}")
+            
+            callback = on_text_callback if on_text_callback else default_callback
+            self.speech_to_text.start_listening(on_text_callback=callback)
+            self.stt_enabled = True
+            print("Speech-to-text enabled and listening")
+            return True
+        except Exception as e:
+            print(f"Error enabling speech-to-text: {e}")
+            return False
+    
+    def disable_speech_to_text(self):
+        """Disable speech-to-text listening"""
+        if self.speech_to_text:
+            self.speech_to_text.stop_listening()
+            self.speech_to_text = None
+            self.stt_enabled = False
+            print("Speech-to-text disabled")
 
     def cleanup(self):
         """Stop monitoring thread and cleanup"""
         self.monitoring_active = False
+        
+        # Clean up current mode
+        if self.current_mode:
+            self.current_mode.cleanup()
+        
+        # Stop speech-to-text
+        self.disable_speech_to_text()
+        
+        # Stop audio capture (legacy cleanup for non-refactored code)
+        # Audio cleanup handled by current mode if needed
+        if hasattr(self, 'audio_stream') and self.audio_stream:
+            self.audio_stream.stop_stream()
+            self.audio_stream.close()
+        if hasattr(self, 'p'):
+            self.p.terminate()
+            print("Audio capture stopped")
+        
         if hasattr(self, 'monitor_thread'):
             self.monitor_thread.join(timeout=1.0)
-        if hasattr(self, 'interjection_thread'):
-            self.interjection_thread.join(timeout=1.0)
-        if hasattr(self, 'text_thread'):
-            self.text_thread.join(timeout=1.0)
+        if hasattr(self, 'visualization_thread'):
+            self.visualization_thread.join(timeout=1.0)
 
     def queue_text(self, text):
-        """Add text to display queue"""
-        with self.text_lock:
-            self.text_queue.append(text)
+        """Text functionality removed for music visualizer"""
+        pass
 
     def process_text_queue(self):
-        """Thread to process queued text displays"""
-        while self.monitoring_active:
-            if self.text_queue and self.display_mode != 'scroll':
-                with self.text_lock:
-                    text = self.text_queue.pop(0)
-                self.text_scroller.start_scroll(text)
-                self.display_mode = 'scroll'
-                # Wait for scroll to complete
-                while self.text_scroller.is_scrolling and self.monitoring_active:
-                    time.sleep(0.1)
-            time.sleep(0.1)
+        """Text functionality removed for music visualizer"""
+        pass
 
-def start(args, client):
-    while True:
+def start(args, client, console_ui=None):
+    """Main update loop"""
+    import time
+    
+    def update():
+        frame_start = time.time()
         client.update_display()
         client.leds.show()
+        frame_time = time.time() - frame_start
+        
+        # Track performance in console UI
+        if console_ui:
+            console_ui.track_performance('LED Display', frame_time)
+    
+    # Check if we're using simulation mode
+    if hasattr(client.leds, 'start_event_loop'):
+        # Simulation mode - use Qt event loop
+        client.leds.start_event_loop(update, client.frame_interval)
+    else:
+        # Real hardware mode - run as fast as possible (no FPS limiting)
+        # LED timing is critical and adding delays causes glitches
+        while True:
+            update()
 
 if __name__ == '__main__':
     client = None
@@ -461,44 +520,124 @@ if __name__ == '__main__':
         parser.add_argument('--website', metavar='N', type=str, nargs='+',
                             help='Website to display')
         parser.add_argument('--mode', metavar='N', type=str, nargs='+',
-                            help='Use camera mode')
+                            help='Use music visualizer mode')
         parser.add_argument('--simulate', type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument('--server', type=bool, action=argparse.BooleanOptionalAction, default=False)
-    
+        parser.add_argument('--test', type=bool, action=argparse.BooleanOptionalAction, default=False)
+        parser.add_argument('--console', type=bool, action=argparse.BooleanOptionalAction, default=False,
+                            help='Enable Kaleidoscape console UI for monitoring and debugging')
+        parser.add_argument('--stt', dest='enable_stt', type=bool, action=argparse.BooleanOptionalAction,
+                            default=True, help='Enable on-device speech-to-text (Whisper). Use --no-stt to skip.')
+        parser.add_argument('--debug-overlay', dest='debug_overlay', action='store_true',
+                            help='Enable overlay mode permanently (masks visual with tush.png)')
+        parser.add_argument('--color-mode', dest='color_mode', type=int, default=1,
+                            help='Color transformation mode for mischief mode (1-4, default: 1). Use 0 to disable.')
         args = parser.parse_args()
         
         server = args.server
         simulate = args.simulate
+        test_mode = args.test
 
-        leds = simulation.Leds(40, 30) if simulate else ws2812.Leds(40, 30, 0.1)
+        # Initialize LED hardware or simulation
+        if simulate:
+            leds = simulation.Leds(40, 30)
+        else:
+            if WS2812_AVAILABLE:
+                leds = ws2812.Leds(40, 30, 1)  # 10% brightness (matching main branch)
+            else:
+                print("WARNING: ws2812 hardware not available, falling back to simulation mode")
+                print("To use real hardware, ensure you're on a Raspberry Pi with required dependencies")
+                simulate = True  # Update flag to reflect actual mode
+                leds = simulation.Leds(40, 30)
 
         client = Client(leds, server)
 
-        if(args.mode and "camera" in args.mode):
-            client.load_camera()
-            client.camera.start()
-            client.display_mode = 'camera'
-        elif(args.mode and "website" in args.mode):
-            #client.load_camera()
-            #client.camera.start()
-            if(args.website):
-                client.load_website(args.website[0])
-                client.display_mode = 'website'
-        elif(args.mode and "dashboard" in args.mode):
-            client.display_mode = 'dashboard'
+        # Determine which mode to use
+        from modes import get_mode, list_modes
+        
+        mode_name = None
+        mode_config = {}
+        
+        if args.mode:
+            # Get mode name from arguments
+            mode_name = args.mode[0] if isinstance(args.mode, list) else args.mode
+            
+            # Handle website mode with URL
+            if mode_name == 'website' and args.website:
+                mode_config['url'] = args.website[0]
+        else:
+            # Default mode
+            mode_name = 'tush'
+        
+        # Create mode instance
+        mode_kwargs = {}
+        if mode_name in ['tush', 'music']:
+            mode_kwargs['debug_overlay'] = args.debug_overlay
+            print(f"[Client] Creating {mode_name} mode with debug_overlay={args.debug_overlay}")
+        elif mode_name == 'mischief':
+            mode_kwargs['color_mode'] = args.color_mode
+            print(f"[Client] Creating {mode_name} mode with color_mode={args.color_mode}")
+        
+        mode = get_mode(mode_name, client.width, client.height, **mode_kwargs)
+        if not mode:
+            print(f"Unknown mode: {mode_name}")
+            print(f"Available modes: {', '.join(list_modes())}")
+            exit(1)
+        
+        # Allow CLI to override mode-specific features (e.g., speech-to-text)
+        if mode_name == 'decompression':
+            mode_config['enable_stt'] = args.enable_stt
+        
+        # Set up and initialize mode
+        mode.setup(**mode_config)
+
+        # Ensure runtime attribute override for modes that inspect enable_stt during init
+        if hasattr(mode, 'enable_stt') and 'enable_stt' in mode_config:
+            mode.enable_stt = mode_config['enable_stt']
+        client.set_mode(mode)
 
         client.init()
+        
+        # Ensure decompression mode starts in its configured base status
+        if mode_name == 'decompression' and hasattr(mode, 'set_status'):
+            mode.set_status('people_kaleidoscope', is_base_status=True)
 
-        thread = Thread(target=start, args=(args, client))
-        thread.start()
-        thread.join()
+        # Start console UI if requested (after initialization)
+        console_ui = None
+        if args.console:
+            try:
+                from console_ui import KaleidoscapeUI
+                console_ui = KaleidoscapeUI(client, mode)
+                
+                # Start display loop in background thread
+                display_thread = threading.Thread(target=lambda: start(args, client, console_ui), daemon=True)
+                display_thread.start()
+                
+                # Store console UI reference in mode for service control
+                # This allows the mode to check service enabled/disabled status
+                mode._console_ui_ref = console_ui
+                
+                # Run console UI in main thread (blocks here) - no prints before this
+                console_ui.run()
+            except ImportError as e:
+                print(f"Warning: Could not start console UI: {e}")
+                print("Install rich library: pip install rich")
+                # Fall back to normal mode
+                start(args, client, None)
+            except Exception as e:
+                print(f"Warning: Console UI error: {e}")
+                import traceback
+                traceback.print_exc()
+                # Fall back to normal mode
+                start(args, client, None)
+        else:
+            # Normal mode - run display loop in main thread
+            start(args, client, console_ui)
 
     except KeyboardInterrupt:
         print("Exiting LED client")
     finally:
         if client:
-            if(args.mode == "camera"):
-                client.camera.stop()
             client.cleanup()  # Stop monitoring thread
             client.leds.blackout()
             client.leds.show()

@@ -1,0 +1,143 @@
+command_type,command_key,response_json,usage_count
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hello beautiful human"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hey there wanderer"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""greetings from the playa"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""what's up burner"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hello you magical being"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hey beautiful soul"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""greetings traveler"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hello there friend"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hey wanderer of the playa"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hello you radiant being"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""greetings from decompression"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hey there beautiful"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hello magical creature"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""greetings friend"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hey there you amazing human"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hello and welcome"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""greetings from the dust"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hey there burner"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""hello beautiful wanderer"", ""text_scroller"": null}",0
+voice_command,hello,"{""action"": {""type"": ""status"", ""status"": ""wave""}, ""tts_response"": ""greetings from black rock city"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""opening my eye for you"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""let me see you"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""eye mode activated"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""watching the playa"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""all eyes on you"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""opening my digital eye"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""let me gaze upon you"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""eye mode engaged"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""watching you beautiful human"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""all eyes on the playa"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""opening my vision"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""let me see the beauty"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""eye activated"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""watching the magic"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""all eyes watching"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""opening my sight"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""let me observe"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""eye mode on"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""watching the wonder"", ""text_scroller"": null}",0
+voice_command,eye,"{""action"": {""type"": ""status"", ""status"": ""eye""}, ""tts_response"": ""all eyes here"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""showing you the people"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""outlining the beautiful humans"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""people mode engaged"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""let's see who's here"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""highlighting the crowd"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""showing the people around"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""outlining the wanderers"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""people mode activated"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""let's see the crowd"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""highlighting the beautiful souls"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""showing you everyone"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""outlining the magical beings"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""people mode on"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""let's see the gathering"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""highlighting the community"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""showing the people here"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""outlining the crowd"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""people engaged"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""let's see who's around"", ""text_scroller"": null}",0
+voice_command,people,"{""action"": {""type"": ""status"", ""status"": ""people""}, ""tts_response"": ""highlighting the beautiful people"", ""text_scroller"": null}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hello beautiful"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hey there"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""waving back at you"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""greetings wanderer"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hello there friend"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""waving hello"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hey beautiful"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""waving back"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""greetings friend"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hello wanderer"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""waving at you"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hey there beautiful"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""waving hello to you"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""greetings from the playa"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hello there"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""waving back beautiful"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hey wanderer"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""waving hello friend"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""greetings"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,wave,"{""action"": {""type"": ""status"", ""status"": ""wave"", ""substate"": ""hand_waving""}, ""tts_response"": ""hello and waving"", ""text_scroller"": {""text"": ""hai"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""thumbs up to you"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""that's radical"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""you're awesome"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""right on"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""hell yeah"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""thumbs up beautiful"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""that's amazing"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""you're incredible"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""right on burner"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""hell yeah friend"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""thumbs up to you friend"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""that's fantastic"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""you're wonderful"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""right on wanderer"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""hell yeah beautiful"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""thumbs up"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""that's great"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""you're amazing"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""right on friend"", ""text_scroller"": null}",0
+gesture,thumbs_up,"{""action"": {""type"": ""status"", ""status"": ""thumbs_up""}, ""tts_response"": ""hell yeah you"", ""text_scroller"": null}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""i see you smiling"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""your smile lights up the playa"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""that's a beautiful smile"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""smiles all around"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""radiating joy"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""i see that smile"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""your smile is magical"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""that's a wonderful smile"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""smiles everywhere"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""radiating happiness"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""i see you smiling beautiful"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""your smile brightens everything"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""that's a radiant smile"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""smiles for everyone"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""radiating positivity"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""i see that beautiful smile"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""your smile is amazing"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""that's a gorgeous smile"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""smiles all around friend"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+gesture,smile,"{""action"": {""type"": ""status"", ""status"": ""smile""}, ""tts_response"": ""radiating pure joy"", ""text_scroller"": {""text"": ""i see you smiling"", ""wobble_amount"": 0.0, ""scroll_time"": 8.0}}",0
+
+gesture,peace,"{""action"": {""type"": ""status"", ""status"": ""peace""}, ""tts_response"": ""peace and love"", ""text_scroller"": {""text"": ""peace"", ""wobble_amount"": 0.0, ""scroll_time"": 4.0}}",0
+gesture,peace,"{""action"": {""type"": ""status"", ""status"": ""peace""}, ""tts_response"": ""peace out"", ""text_scroller"": {""text"": ""peace out"", ""wobble_amount"": 0.0, ""scroll_time"": 5.5}}",0
+gesture,peace,"{""action"": {""type"": ""status"", ""status"": ""peace""}, ""tts_response"": ""spreading peace"", ""text_scroller"": {""text"": ""peace"", ""wobble_amount"": 0.0, ""scroll_time"": 4.0}}",0
+gesture,heart,"{""action"": {""type"": ""status"", ""status"": ""heart""}, ""tts_response"": ""sending love"", ""text_scroller"": {""text"": ""<3"", ""wobble_amount"": 0.0, ""scroll_time"": 2.5}}",0
+gesture,heart,"{""action"": {""type"": ""status"", ""status"": ""heart""}, ""tts_response"": ""love you too"", ""text_scroller"": {""text"": ""love"", ""wobble_amount"": 0.0, ""scroll_time"": 3.5}}",0
+gesture,heart,"{""action"": {""type"": ""status"", ""status"": ""heart""}, ""tts_response"": ""radiating love"", ""text_scroller"": {""text"": ""<3"", ""wobble_amount"": 0.0, ""scroll_time"": 2.5}}",0
+gesture,rock_on,"{""action"": {""type"": ""status"", ""status"": ""rock_on""}, ""tts_response"": ""rock on"", ""text_scroller"": {""text"": ""rock on"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,rock_on,"{""action"": {""type"": ""status"", ""status"": ""rock_on""}, ""tts_response"": ""hell yeah"", ""text_scroller"": {""text"": ""hell yeah"", ""wobble_amount"": 0.0, ""scroll_time"": 5.5}}",0
+gesture,rock_on,"{""action"": {""type"": ""status"", ""status"": ""rock_on""}, ""tts_response"": ""metal"", ""text_scroller"": {""text"": ""metal"", ""wobble_amount"": 0.0, ""scroll_time"": 4.0}}",0
+gesture,point,"{""action"": {""type"": ""status"", ""status"": ""point""}, ""tts_response"": ""pointing at you"", ""text_scroller"": {""text"": ""you"", ""wobble_amount"": 0.0, ""scroll_time"": 2.5}}",0
+gesture,point,"{""action"": {""type"": ""status"", ""status"": ""point""}, ""tts_response"": ""i see you"", ""text_scroller"": {""text"": ""i see you"", ""wobble_amount"": 0.0, ""scroll_time"": 5.5}}",0
+gesture,clap,"{""action"": {""type"": ""status"", ""status"": ""clap""}, ""tts_response"": ""clapping with you"", ""text_scroller"": {""text"": ""clap clap"", ""wobble_amount"": 0.0, ""scroll_time"": 6.0}}",0
+gesture,clap,"{""action"": {""type"": ""status"", ""status"": ""clap""}, ""tts_response"": ""applause"", ""text_scroller"": {""text"": ""applause"", ""wobble_amount"": 0.0, ""scroll_time"": 5.5}}",0
+gesture,fist_pump,"{""action"": {""type"": ""status"", ""status"": ""fist_pump""}, ""tts_response"": ""yes"", ""text_scroller"": {""text"": ""yes"", ""wobble_amount"": 0.0, ""scroll_time"": 3.0}}",0
+gesture,fist_pump,"{""action"": {""type"": ""status"", ""status"": ""fist_pump""}, ""tts_response"": ""pump it up"", ""text_scroller"": {""text"": ""pump"", ""wobble_amount"": 0.0, ""scroll_time"": 3.5}}",0
+gesture,surrender,"{""action"": {""type"": ""status"", ""status"": ""surrender""}, ""tts_response"": ""hands up"", ""text_scroller"": {""text"": ""hands up"", ""wobble_amount"": 0.0, ""scroll_time"": 5.5}}",0
+gesture,surrender,"{""action"": {""type"": ""status"", ""status"": ""surrender""}, ""tts_response"": ""i surrender"", ""text_scroller"": {""text"": ""surrender"", ""wobble_amount"": 0.0, ""scroll_time"": 6.0}}",0
+gesture,prayer,"{""action"": {""type"": ""status"", ""status"": ""prayer""}, ""tts_response"": ""namaste"", ""text_scroller"": {""text"": ""namaste"", ""wobble_amount"": 0.0, ""scroll_time"": 5.0}}",0
+gesture,prayer,"{""action"": {""type"": ""status"", ""status"": ""prayer""}, ""tts_response"": ""blessings"", ""text_scroller"": {""text"": ""blessings"", ""wobble_amount"": 0.0, ""scroll_time"": 6.0}}",0
+gesture,air_guitar,"{""action"": {""type"": ""status"", ""status"": ""air_guitar""}, ""tts_response"": ""rock and roll"", ""text_scroller"": {""text"": ""rock"", ""wobble_amount"": 0.0, ""scroll_time"": 3.5}}",0
+gesture,air_guitar,"{""action"": {""type"": ""status"", ""status"": ""air_guitar""}, ""tts_response"": ""air guitar"", ""text_scroller"": {""text"": ""guitar"", ""wobble_amount"": 0.0, ""scroll_time"": 4.5}}",0

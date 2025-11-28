@@ -1,8 +1,11 @@
+models
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 venv/
+.winvenv/
 
 # Environment variables
 .env
@@ -10,8 +13,11 @@ client/.env
 
 # Media files
 *.wav
-*.png
 out/
+
+# TTS cache
+tts_cache/
+client/tts_cache/
 
 # IDE
 .vscode/

@@ -1,6 +1,18 @@
 #!/bin/bash
 
-cd /home/yusuf/Code/led-screen/client
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Enable multi-threading for NumPy and OpenCV to utilize all CPU cores
+export OPENCV_NUM_THREADS=0  # 0 = use all available threads
+export OMP_NUM_THREADS=0  # OpenMP threads for NumPy (0 = all cores)
+export MKL_NUM_THREADS=0  # Intel MKL threads (0 = all cores)
+export NUMEXPR_NUM_THREADS=0  # NumExpr threads (0 = all cores)
+export VECLIB_MAXIMUM_THREADS=0  # Accelerate framework (macOS)
+
+# Kill any zombie processes that cause timing jitter
+pkill chromedriver 2>/dev/null
 
 # Function to handle cleanup on script exit
 cleanup() {
@@ -23,24 +35,79 @@ if [ ! -d ".venv" ]; then
     pip install -r requirements.txt
 else
     source .venv/bin/activate
+    #pip install -r requirements.txt
 fi
 
-sudo apt install python3-pyaudio
+# Parse mode from arguments (default to tush for backward compatibility)
+MODE="tush"
+for arg in "$@"; do
+    if [[ "$arg" == "--mode" ]]; then
+        MODE_FLAG=true
+    elif [[ "$MODE_FLAG" == true ]]; then
+        MODE="$arg"
+        MODE_FLAG=false
+        break
+    fi
+done
 
-# Start local Hydra instance
-echo "Starting local Hydra instance..."
-cd /home/yusuf/Code/hydra && npm run dev &
-
-# Wait for Hydra to start up
-sleep 5
-
-# Start the LED client with local Hydra URL
-echo "Starting LED client..."
-python3 client.py --mode website --website http://localhost:5173 &
-
-# Start the speech recognition listener
-echo "Starting speech listener..."
-python3 listener.py &
+# Start Hydra for modes that need it (tush/music/hydra_mask/mask/decompression/mischief)
+if [[ "$MODE" == "tush" ]] || [[ "$MODE" == "music" ]] || [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]] || [[ "$MODE" == "decompression" ]] || [[ "$MODE" == "mischief" ]]; then
+    # Check if console mode is enabled (need to check before starting Hydra)
+    CONSOLE_MODE=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--console" ]]; then
+            CONSOLE_MODE=true
+            break
+        fi
+    done
+    
+    echo "Starting local Hydra instance for $MODE mode..."
+    # Redirect Hydra output to log file when in console mode to avoid interfering with Rich
+    if [[ "$CONSOLE_MODE" == true ]]; then
+        cd "$SCRIPT_DIR/../../hydra" && npm run dev &
+    else
+        cd "$SCRIPT_DIR/../../hydra" && npm run dev &
+    fi
+    
+    # Wait for Hydra to start up
+    sleep 5
+    
+    # Return to script directory
+    cd "$SCRIPT_DIR"
+    
+    echo "Starting $MODE mode..."
+    
+    # Run in foreground for console mode or hydra_mask/mask modes (to allow stdin input)
+    if [[ "$CONSOLE_MODE" == true ]] || [[ "$MODE" == "hydra_mask" ]] || [[ "$MODE" == "mask" ]]; then
+        # Clear screen before starting Rich console to ensure clean terminal state
+        if [[ "$CONSOLE_MODE" == true ]]; then
+            clear
+        fi
+        python3 client.py "$@"
+        # After console mode exits, cleanup background services (e.g., Hydra)
+        cleanup
+    else
+        python3 client.py "$@" &
+    fi
+else
+    echo "Starting $MODE mode (Hydra not needed)..."
+    # Check if console mode is enabled
+    CONSOLE_MODE=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--console" ]]; then
+            CONSOLE_MODE=true
+            break
+        fi
+    done
+    
+    # Run in foreground for console mode (to allow stdin input)
+    if [[ "$CONSOLE_MODE" == true ]]; then
+        python3 client.py "$@"
+        cleanup
+    else
+        python3 client.py "$@" &
+    fi
+fi
 
 # Wait a moment to ensure services are running
 sleep 2
